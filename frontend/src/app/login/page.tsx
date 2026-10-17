@@ -42,8 +42,8 @@ export default function LoginPage() {
         setCurrentUser(res.data.user);
         setSuccess(true);
         setTimeout(() => {
-          router.push('/');
-        }, 800);
+          window.location.href = '/';
+        }, 600);
       } else {
         throw new Error(res.message || 'Login failed');
       }
@@ -164,14 +164,11 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* Return to Dashboard link */}
-        <div className="text-center pt-2">
-          <Link
-            href="/"
-            className="text-xs text-slate-500 hover:text-slate-800 font-medium inline-flex items-center gap-1"
-          >
-            Continue as Guest Reviewer &rarr;
-          </Link>
+        {/* Security Notice */}
+        <div className="text-center pt-2 border-t border-slate-100">
+          <p className="text-[11px] text-slate-400">
+            Institutional authentication required. Access restricted to authorized personnel.
+          </p>
         </div>
       </div>
 

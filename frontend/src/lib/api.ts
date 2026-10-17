@@ -8,6 +8,7 @@ export function getAuthToken(): string | null {
 export function setAuthToken(token: string) {
   if (typeof window === 'undefined') return;
   localStorage.setItem('pq_auth_token', token);
+  document.cookie = `pq_auth_token=${encodeURIComponent(token)}; path=/; max-age=604800; SameSite=Lax`;
 }
 
 export function getCurrentUser(): any | null {
@@ -30,6 +31,7 @@ export function logout() {
   if (typeof window === 'undefined') return;
   localStorage.removeItem('pq_auth_token');
   localStorage.removeItem('pq_auth_user');
+  document.cookie = 'pq_auth_token=; path=/; max-age=0; SameSite=Lax';
 }
 
 export async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
@@ -50,6 +52,12 @@ export async function fetchApi<T>(endpoint: string, options?: RequestInit): Prom
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    if (response.status === 401) {
+      logout();
+      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+    }
     throw new Error(data.message || `Request failed with status ${response.status}`);
   }
   return data;

@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
   Server,
@@ -16,7 +16,9 @@ import {
   ChevronRight,
   Menu,
   X,
+  LogOut,
 } from 'lucide-react';
+import { logout } from '@/lib/api';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -31,6 +33,7 @@ const navigation = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [mobileOpen, setMobileOpen] = React.useState(false);
 
   const isActive = (href: string) => {
@@ -124,8 +127,26 @@ export function Sidebar() {
           })}
         </nav>
 
+        {/* Sign Out Action */}
+        <div className="p-3 border-t border-navy-850 bg-navy-950/70">
+          <button
+            onClick={() => {
+              logout();
+              router.push('/login');
+            }}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition group"
+            title="Sign out and lock session"
+          >
+            <div className="flex items-center gap-2.5">
+              <LogOut className="w-4 h-4 text-slate-400 group-hover:text-red-400" />
+              <span className="font-semibold text-slate-300 group-hover:text-red-300">Sign Out</span>
+            </div>
+            <span className="text-[10px] text-slate-500 font-mono">Lock</span>
+          </button>
+        </div>
+
         {/* Footer info */}
-        <div className="p-4 border-t border-navy-850 bg-navy-950/50">
+        <div className="p-3.5 border-t border-navy-850 bg-navy-950/50">
           <div className="text-[11px] text-slate-400 space-y-0.5">
             <div className="flex justify-between">
               <span>Standard Engine:</span>
