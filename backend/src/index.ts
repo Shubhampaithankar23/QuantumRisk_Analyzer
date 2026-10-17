@@ -8,6 +8,7 @@ import { errorHandler } from './middleware/errorHandler';
 
 import healthRoutes from './routes/health.routes';
 import authRoutes from './routes/auth.routes';
+import dashboardRoutes from './routes/dashboard.routes';
 
 dotenv.config();
 
@@ -38,6 +39,7 @@ app.use(standardLimiter);
 
 // API v1 Base Route
 app.use('/api/v1', healthRoutes);
+app.use('/api/v1', dashboardRoutes);
 app.use('/api/v1/auth', authRoutes);
 
 // Central Error Handler

@@ -19,8 +19,8 @@
 |---|---|---|
 | **Phase 1** | Environment inspection, directory structure, Git, root package.json, documentation | **Completed** |
 | **Phase 2** | SQLite, Prisma models, backend configuration, security middleware, health check API | **Completed** |
-| **Phase 3** | Frontend layout, dark navy/green institutional theme, dashboard UI | **In Progress** |
-| **Phase 4** | Asset inventory management & bulk file import (CSV, XLSX, JSON) | Planned |
+| **Phase 3** | Frontend layout, dark navy/green institutional theme, dashboard UI | **Completed** |
+| **Phase 4** | Asset inventory management & bulk file import (CSV, XLSX, JSON) | **In Progress** |
 | **Phase 5** | Authorized website scanner (TLS probing, cert extraction, SSRF security controls) | Planned |
 | **Phase 6** | Post-quantum assessment engine & direct NIST-aligned recommendation generator | Planned |
 | **Phase 7** | End-to-end integration of all frontend pages with backend REST APIs | Planned |
