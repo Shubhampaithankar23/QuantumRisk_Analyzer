@@ -51,6 +51,20 @@ export function normalizeEvidenceSource(
   return 'inferred';
 }
 
+function normalizeAlgorithmForDeduplication(rawAlgorithm: string, purpose?: string): string {
+  const algorithm = rawAlgorithm.trim().toUpperCase().replace(/\s+/g, ' ');
+  const normalizedPurpose = purpose?.toUpperCase() || inferPurpose(algorithm);
+
+  if (
+    normalizedPurpose === 'DIGITAL_SIGNATURE' &&
+    /^ECDSA(?:[-_ ]?P?[-_ ]?(?:256|384|521))?$/.test(algorithm)
+  ) {
+    return 'ECDSA';
+  }
+
+  return algorithm;
+}
+
 export function evaluateAlgorithm(
   rawAlgo: string,
   declaredPurpose?: string,
@@ -508,7 +522,9 @@ export async function runAssessmentForAsset(assetId: string): Promise<Assessment
       const purpose = item.purpose;
       if (rawAlgo && rawAlgo !== '[object Object]' && rawAlgo.trim() !== '') {
         const alreadyFound = findingsToCreate.some(
-          (f) => f.algorithmOrConfig.toLowerCase() === rawAlgo.toLowerCase()
+          (f) =>
+            normalizeAlgorithmForDeduplication(f.algorithmOrConfig, f.purpose) ===
+            normalizeAlgorithmForDeduplication(rawAlgo, purpose)
         );
         if (!alreadyFound) {
           findingsToCreate.push(

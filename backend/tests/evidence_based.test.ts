@@ -41,9 +41,57 @@ describe('Evidence-First Assessment & Traceability (No Fake Data)', () => {
     testAssetId = asset.id;
   });
 
+  it('does not count ECDSA scan evidence and its inventory alias twice', async () => {
+    const asset = await prisma.asset.create({
+      data: {
+        name: 'Duplicate Evidence Test Website',
+        identifier: 'duplicate-evidence.test.edu',
+        assetType: 'WEBSITE',
+        institutionId: testInstitutionId,
+        informationSource: 'TLS_SCAN',
+        knownAlgorithms: JSON.stringify([
+          { algorithm: 'ECDSA', purpose: 'DIGITAL_SIGNATURE' },
+          { algorithm: 'X25519MLKEM768', purpose: 'KEY_ESTABLISHMENT' },
+          { algorithm: 'TLS_AES_256_GCM_SHA384', purpose: 'SYMMETRIC_ENCRYPTION' },
+        ]),
+      },
+    });
+    await prisma.scanJob.create({
+      data: {
+        assetId: asset.id,
+        targetHost: asset.identifier,
+        status: 'COMPLETED',
+        completedAt: new Date(),
+        results: {
+          create: {
+            targetHost: asset.identifier,
+            port: 443,
+            certPubKeyAlgo: 'ECDSA',
+            certKeySize: 256,
+            keyExchangeGroup: 'X25519MLKEM768',
+            cipherSuiteNegotiated: 'TLS_AES_256_GCM_SHA384',
+          },
+        },
+      },
+    });
+
+    const result = await runAssessmentForAsset(asset.id);
+    const signatureFindings = result.findings.filter((finding) => finding.purpose === 'DIGITAL_SIGNATURE');
+
+    expect(signatureFindings).toHaveLength(1);
+    expect(result.findings).toHaveLength(3);
+    expect(result.quantumRiskScore).toBe(25);
+    expect(result.overallReadinessStatus).toBe('HYBRID_READY');
+  });
+
   afterAll(async () => {
     await prisma.asset.deleteMany({
-      where: { identifier: { contains: 'evidence-' } },
+      where: {
+        OR: [
+          { identifier: { contains: 'evidence-' } },
+          { identifier: { contains: 'duplicate-evidence-' } },
+        ],
+      },
     });
   });
 
