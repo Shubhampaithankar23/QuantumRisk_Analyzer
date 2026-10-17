@@ -110,7 +110,8 @@ export async function generatePdfReport(institutionId?: string): Promise<Buffer>
       const rec = f.recommendations[0];
       doc.fillColor('#0f172a').fontSize(9).font('Helvetica-Bold').text(`${idx + 1}. ${f.title} (${f.riskLevel} RISK)`);
       doc.fillColor('#475569').fontSize(8.5).font('Helvetica').text(`   Affected System: ${f.asset.name} (${f.asset.identifier})`);
-      doc.text(`   Cryptographic Purpose: ${f.purpose} | Evidence Source: ${f.evidenceSource} | Standard: ${f.standardRef}`);
+      doc.text(`   Observed Cryptography: ${f.observedValue || f.algorithmOrConfig} | Purpose: ${f.purpose}`);
+      doc.text(`   Evidence Source: ${f.evidenceSource} | Confidence: ${f.confidence} | Rule: ${f.ruleId || 'NIST-FIPS'}`);
       doc.text(`   Why Risky: ${f.riskReason}`);
       if (rec) {
         doc.fillColor('#047857').font('Helvetica-Bold').text(`   Target Recommendation: ${rec.recommendedAlgorithm}`);

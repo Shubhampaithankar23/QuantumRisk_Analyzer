@@ -1,7 +1,6 @@
 import tls from 'tls';
 import dns from 'dns';
 import net from 'net';
-import prisma from '../lib/prisma';
 
 export interface ScanTargetInput {
   targetHost: string;
@@ -29,6 +28,8 @@ export interface ScanOutput {
   keyExchangeGroup?: string;
   isPqHybrid: boolean;
   ocspStapled: boolean;
+  scannerVersion: string;
+  scannedAt: string;
   rawDetails: any;
 }
 
@@ -119,7 +120,7 @@ export async function validateScanTarget(hostname: string, port: number = 443): 
   }
 }
 
-// Probes a specific TLS version
+// Real TLS connection inspection
 async function testTlsConnection(
   host: string,
   port: number,
@@ -135,15 +136,17 @@ async function testTlsConnection(
         rejectUnauthorized: false,
         minVersion,
         maxVersion,
-        timeout: 5000,
+        timeout: 6000,
       },
       () => {
         try {
           const cipher = socket.getCipher();
           const protocol = socket.getProtocol();
           const cert = socket.getPeerCertificate(true);
+          const x509 = socket.getPeerX509Certificate ? socket.getPeerX509Certificate() : null;
+          const ephemeralKeyInfo = socket.getEphemeralKeyInfo ? socket.getEphemeralKeyInfo() : null;
           socket.end();
-          resolve({ cipher, protocol, cert });
+          resolve({ cipher, protocol, cert, x509, ephemeralKeyInfo });
         } catch {
           socket.destroy();
           resolve(null);
@@ -196,63 +199,107 @@ export async function executeTlsScan(
 
   if (!primaryInspection) {
     throw new Error(
-      `TLS handshake failed with target host "${targetHost}:${port}". Ensure the host supports HTTPS/TLS and is reachable.`
+      `TLS handshake failed with target host "${targetHost}:${port}". Ensure the host supports HTTPS/TLS, is reachable, and allows public inspection.`
     );
   }
 
   const cert = primaryInspection.cert || {};
+  const x509 = primaryInspection.x509;
   const cipher = primaryInspection.cipher || {};
+  const ephemeralKeyInfo = primaryInspection.ephemeralKeyInfo;
   const tlsVersionNegotiated = primaryInspection.protocol;
 
-  // Extract certificate attributes
+  // Extract certificate attributes directly from OpenSSL X.509
   let certPubKeyAlgo = 'Unknown';
   let certKeySize: number | undefined = undefined;
 
-  if (cert.bits) {
+  if (x509 && x509.publicKey) {
+    const keyType = x509.publicKey.asymmetricKeyType;
+    const keyDetails = x509.publicKey.asymmetricKeyDetails;
+
+    if (keyType === 'rsa') {
+      certPubKeyAlgo = 'RSA';
+      certKeySize = keyDetails?.modulusLength || cert.bits;
+    } else if (keyType === 'ec') {
+      certPubKeyAlgo = 'ECDSA';
+      const curve = keyDetails?.namedCurve || cert.asn1Curve || cert.nistCurve;
+      if (curve === 'secp384r1') certKeySize = 384;
+      else if (curve === 'secp521r1') certKeySize = 521;
+      else certKeySize = 256;
+    } else if (keyType === 'ed25519') {
+      certPubKeyAlgo = 'Ed25519';
+      certKeySize = 256;
+    } else if (keyType === 'ed448') {
+      certPubKeyAlgo = 'Ed448';
+      certKeySize = 448;
+    } else if (cert.bits) {
+      certKeySize = cert.bits;
+    }
+  } else if (cert.bits) {
     certKeySize = cert.bits;
+    if (cert.asn1Curve || cert.nistCurve) {
+      certPubKeyAlgo = 'ECDSA';
+    } else if (certKeySize === 2048 || certKeySize === 4096 || certKeySize === 3072) {
+      certPubKeyAlgo = 'RSA';
+    }
   }
 
-  // Infer or read public key algorithm
-  if (cert.pubkey) {
-    const pkStr = String(cert.pubkey);
-    if (pkStr.includes('rsa') || pkStr.includes('RSA')) certPubKeyAlgo = 'RSA';
-    else if (pkStr.includes('ec') || pkStr.includes('EC')) certPubKeyAlgo = 'ECDSA';
-  } else if (cert.asn1Curve) {
-    certPubKeyAlgo = 'ECDSA';
-  } else if (certKeySize && (certKeySize === 2048 || certKeySize === 4096 || certKeySize === 3072)) {
-    certPubKeyAlgo = 'RSA';
-  } else if (certKeySize && (certKeySize === 256 || certKeySize === 384 || certKeySize === 521)) {
-    certPubKeyAlgo = 'ECDSA';
-  }
-
-  // Key exchange mechanism detection
-  let keyExchangeGroup = 'ECDHE (Classical)';
+  // Key exchange mechanism: directly from negotiated ephemeral parameters
+  let keyExchangeGroup = 'Unknown Key Exchange';
   let isPqHybrid = false;
 
-  const cipherName = cipher.name || '';
-  if (cipherName.includes('MLKEM') || cipherName.includes('X25519MLKEM768') || cipherName.includes('Kyber')) {
-    isPqHybrid = true;
-    keyExchangeGroup = 'X25519MLKEM768 (Hybrid Post-Quantum)';
-  } else if (cipherName.startsWith('TLS_')) {
-    keyExchangeGroup = 'ECDHE / X25519 (TLS 1.3 Key Exchange)';
-  } else if (cipherName.includes('ECDHE')) {
-    keyExchangeGroup = 'ECDHE (Classical)';
-  } else if (cipherName.includes('DHE')) {
-    keyExchangeGroup = 'DHE (Classical Finite Field)';
-  } else if (cipherName.includes('RSA')) {
-    keyExchangeGroup = 'RSA Key Transport (Legacy)';
+  if (ephemeralKeyInfo) {
+    const kType = ephemeralKeyInfo.type || 'ECDH';
+    const kName = ephemeralKeyInfo.name || 'Unknown';
+    const kSize = ephemeralKeyInfo.size ? ` (${ephemeralKeyInfo.size} bits)` : '';
+    keyExchangeGroup = `${kType} / ${kName}${kSize}`;
+
+    if (
+      kName.toUpperCase().includes('MLKEM') ||
+      kName.toUpperCase().includes('KYBER') ||
+      kName.toUpperCase().includes('X25519MLKEM768')
+    ) {
+      isPqHybrid = true;
+    }
+  } else {
+    const cipherName = cipher.name || '';
+    if (cipherName.includes('MLKEM') || cipherName.includes('Kyber')) {
+      isPqHybrid = true;
+      keyExchangeGroup = 'X25519MLKEM768 (Hybrid Post-Quantum)';
+    } else if (cipherName.startsWith('TLS_')) {
+      keyExchangeGroup = 'ECDHE / X25519 (TLS 1.3 Key Exchange)';
+    } else if (cipherName.includes('ECDHE')) {
+      keyExchangeGroup = 'ECDHE (Classical Elliptic Curve Diffie-Hellman)';
+    } else if (cipherName.includes('DHE')) {
+      keyExchangeGroup = 'DHE (Classical Finite Field Diffie-Hellman)';
+    } else if (cipherName.includes('RSA')) {
+      keyExchangeGroup = 'RSA Key Transport (Legacy Static)';
+    }
   }
 
   // Subject and Issuer formatting
   const certSubject = cert.subject
     ? cert.subject.CN || cert.subject.O || JSON.stringify(cert.subject)
-    : undefined;
+    : x509?.subject;
   const certIssuer = cert.issuer
     ? cert.issuer.CN || cert.issuer.O || JSON.stringify(cert.issuer)
+    : x509?.issuer;
+
+  const certValidFrom = cert.valid_from
+    ? new Date(cert.valid_from)
+    : x509?.validFrom
+    ? new Date(x509.validFrom)
+    : undefined;
+  const certValidTo = cert.valid_to
+    ? new Date(cert.valid_to)
+    : x509?.validTo
+    ? new Date(x509.validTo)
     : undefined;
 
-  const certValidFrom = cert.valid_from ? new Date(cert.valid_from) : undefined;
-  const certValidTo = cert.valid_to ? new Date(cert.valid_to) : undefined;
+  // Genuine signature algorithm (no hardcoded fallback)
+  const certSignatureAlgo = cert.sigalg || (x509 as any)?.signatureAlgorithm || undefined;
+  const scannerVersion = `Node-TLS/OpenSSL-${process.versions.openssl}`;
+  const scannedAt = new Date().toISOString();
 
   return {
     targetHost,
@@ -267,20 +314,26 @@ export async function executeTlsScan(
     certValidTo,
     certPubKeyAlgo,
     certKeySize,
-    certSignatureAlgo: cert.sigalg || 'SHA256withRSA',
-    certSerial: cert.serialNumber,
+    certSignatureAlgo,
+    certSerial: cert.serialNumber || x509?.serialNumber,
     keyExchangeGroup,
     isPqHybrid,
     ocspStapled: Boolean(primaryInspection.ocspResponse),
+    scannerVersion,
+    scannedAt,
     rawDetails: {
       cipher,
       protocol: tlsVersionNegotiated,
+      ephemeralKeyInfo,
+      publicKey: x509?.publicKey?.asymmetricKeyDetails,
       subject: cert.subject,
       issuer: cert.issuer,
       valid_from: cert.valid_from,
       valid_to: cert.valid_to,
-      fingerprint256: cert.fingerprint256,
+      fingerprint256: cert.fingerprint256 || x509?.fingerprint256,
       bits: cert.bits,
+      scannerVersion,
+      scannedAt,
     },
   };
 }

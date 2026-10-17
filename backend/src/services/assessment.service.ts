@@ -3,11 +3,15 @@ import prisma from '../lib/prisma';
 export interface FindingEvaluation {
   title: string;
   algorithmOrConfig: string;
+  observedValue: string;
   purpose: 'DIGITAL_SIGNATURE' | 'KEY_ESTABLISHMENT' | 'SYMMETRIC_ENCRYPTION' | 'HASH_FUNCTION' | 'PROTOCOL';
   riskLevel: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFORMATIONAL';
   riskReason: string;
+  evidenceSource: 'scanner_verified' | 'imported' | 'user_reported' | 'inferred';
+  ruleId: string;
   standardRef: string;
   confidence: 'HIGH' | 'MEDIUM' | 'NEEDS_VERIFICATION';
+  limitations: string;
   recommendation: {
     recommendedAlgorithm: string;
     rationale: string;
@@ -22,20 +26,40 @@ export interface FindingEvaluation {
 export interface AssessmentResult {
   assetId: string;
   quantumRiskScore: number; // 0 - 100
-  overallReadinessStatus: 'QUANTUM_VULNERABLE' | 'TRANSITION_REQUIRED' | 'HYBRID_READY' | 'POST_QUANTUM_READY';
+  overallReadinessStatus: 'QUANTUM_VULNERABLE' | 'TRANSITION_REQUIRED' | 'HYBRID_READY' | 'POST_QUANTUM_READY' | 'NOT_ASSESSED';
   summary: string;
   methodology: string;
   ruleVersion: string;
+  scoreBreakdown: string;
   findings: FindingEvaluation[];
+}
+
+export function normalizeEvidenceSource(
+  source?: string
+): 'scanner_verified' | 'imported' | 'user_reported' | 'inferred' {
+  if (!source) return 'inferred';
+  const s = source.toUpperCase();
+  if (s === 'TLS_SCAN' || s === 'SCANNER_VERIFIED' || s === 'VERIFIED_SCAN') {
+    return 'scanner_verified';
+  }
+  if (s.includes('IMPORT') || s.includes('CSV') || s.includes('XLSX') || s.includes('JSON')) {
+    return 'imported';
+  }
+  if (s.includes('MANUAL') || s.includes('USER') || s.includes('REPORTED')) {
+    return 'user_reported';
+  }
+  return 'inferred';
 }
 
 export function evaluateAlgorithm(
   rawAlgo: string,
   declaredPurpose?: string,
-  evidenceSource: string = 'MANUAL'
+  evidenceSourceInput: string = 'inferred'
 ): FindingEvaluation {
-  const algo = rawAlgo.trim().toUpperCase();
+  const algo = (rawAlgo || '').trim().toUpperCase();
+  const evidenceSource = normalizeEvidenceSource(evidenceSourceInput);
   const purpose = declaredPurpose ? declaredPurpose.toUpperCase() : inferPurpose(algo);
+  const observedValue = rawAlgo || 'Unknown';
 
   // 1. DIGITAL SIGNATURES
   if (
@@ -47,13 +71,19 @@ export function evaluateAlgorithm(
   ) {
     if (algo.includes('ML-DSA') || algo.includes('DILITHIUM')) {
       return {
-        title: `Post-Quantum Signature Standard in Use (${algo})`,
+        title: `Post-Quantum Signature Standard Active (${rawAlgo})`,
         algorithmOrConfig: rawAlgo,
+        observedValue,
         purpose: 'DIGITAL_SIGNATURE',
         riskLevel: 'LOW',
-        riskReason: 'Algorithm conforms to NIST FIPS 204 (ML-DSA) and provides quantum resistance against Shor\'s algorithm.',
+        riskReason:
+          'Algorithm conforms to NIST FIPS 204 (ML-DSA) and provides quantum resistance against Shor\'s algorithm.',
+        evidenceSource,
+        ruleId: 'NIST-FIPS-204-MLDSA',
         standardRef: 'NIST FIPS 204',
-        confidence: 'HIGH',
+        confidence: evidenceSource === 'scanner_verified' ? 'HIGH' : 'MEDIUM',
+        limitations:
+          'Assesses observed public key algorithm against Shor factoring/discrete-log attacks. Does not evaluate certificate chain authority verification or private key storage security.',
         recommendation: {
           recommendedAlgorithm: 'Maintain ML-DSA Configuration',
           rationale: 'Algorithm provides state-of-the-art lattice-based signature security.',
@@ -68,13 +98,19 @@ export function evaluateAlgorithm(
 
     if (algo.includes('SLH-DSA') || algo.includes('SPHINCS')) {
       return {
-        title: `Stateless Hash-Based Post-Quantum Signature in Use (${algo})`,
+        title: `Stateless Hash-Based Post-Quantum Signature Active (${rawAlgo})`,
         algorithmOrConfig: rawAlgo,
+        observedValue,
         purpose: 'DIGITAL_SIGNATURE',
         riskLevel: 'LOW',
-        riskReason: 'Algorithm conforms to NIST FIPS 205 (SLH-DSA). Built upon conservative hash function assumptions.',
+        riskReason:
+          'Algorithm conforms to NIST FIPS 205 (SLH-DSA). Built upon conservative hash function assumptions.',
+        evidenceSource,
+        ruleId: 'NIST-FIPS-205-SLHDSA',
         standardRef: 'NIST FIPS 205',
-        confidence: 'HIGH',
+        confidence: evidenceSource === 'scanner_verified' ? 'HIGH' : 'MEDIUM',
+        limitations:
+          'Signature verified as post-quantum secure. Bandwidth and verification speed must be profiled under peak load.',
         recommendation: {
           recommendedAlgorithm: 'Maintain SLH-DSA Configuration',
           rationale: 'Provides robust fallback post-quantum security independent of lattice mathematics.',
@@ -94,19 +130,25 @@ export function evaluateAlgorithm(
         !algo.includes('ECDSA') &&
         !algo.includes('ML-DSA') &&
         !algo.includes('SLH-DSA'));
+
     return {
       title: `Quantum-Vulnerable Digital Signature (${rawAlgo})`,
       algorithmOrConfig: rawAlgo,
+      observedValue,
       purpose: 'DIGITAL_SIGNATURE',
       riskLevel: isLegacy ? 'CRITICAL' : 'HIGH',
       riskReason:
         'Vulnerable to polynomial-time factoring or discrete logarithm solving via Shor\'s algorithm on a Cryptanalytically Relevant Quantum Computer (CRQC). Digital signatures will become forgeable.',
+      evidenceSource,
+      ruleId: isLegacy ? 'LEGACY-VULN-SIGNATURE' : 'NIST-PQC-VULN-SIG',
       standardRef: 'NIST FIPS 204 / NIST SP 800-208',
-      confidence: 'HIGH',
+      confidence: evidenceSource === 'scanner_verified' ? 'HIGH' : 'MEDIUM',
+      limitations:
+        'Identifies quantum vulnerability of public key signature algorithm. Does not evaluate web server application security or TLS session data in transit.',
       recommendation: {
         recommendedAlgorithm: 'ML-DSA-65 (NIST FIPS 204) or SLH-DSA (NIST FIPS 205)',
         rationale:
-          'ML-DSA is the primary NIST-standardized post-quantum digital signature algorithm, offering balanced performance and signature size.',
+          'ML-DSA is the primary NIST-standardized post-quantum digital signature algorithm, offering balanced performance and signature size. Never substitute a key-encapsulation mechanism (ML-KEM) for signature validation.',
         whyAppropriate:
           'Directly replaces classical public key signatures without altering PKI validation mechanics, while withstanding quantum cryptanalysis.',
         compatibilityNotes:
@@ -130,17 +172,24 @@ export function evaluateAlgorithm(
     algo.includes('DIFFIE-HELLMAN') ||
     algo.includes('DHE') ||
     algo.includes('X25519') ||
-    algo.includes('P-256')
+    algo.includes('P-256') ||
+    algo.includes('SECP')
   ) {
     if (algo.includes('ML-KEM') || algo.includes('KYBER') || algo.includes('X25519MLKEM768')) {
       return {
-        title: `Post-Quantum Key Encapsulation Active (${algo})`,
+        title: `Post-Quantum Key Encapsulation Active (${rawAlgo})`,
         algorithmOrConfig: rawAlgo,
+        observedValue,
         purpose: 'KEY_ESTABLISHMENT',
         riskLevel: 'LOW',
-        riskReason: 'Conforms to NIST FIPS 203 (ML-KEM) and provides quantum resistance against Store Now, Decrypt Later (SNDL) attacks.',
+        riskReason:
+          'Conforms to NIST FIPS 203 (ML-KEM) and provides quantum resistance against Store Now, Decrypt Later (SNDL) attacks.',
+        evidenceSource,
+        ruleId: 'NIST-FIPS-203-MLKEM',
         standardRef: 'NIST FIPS 203',
-        confidence: 'HIGH',
+        confidence: evidenceSource === 'scanner_verified' ? 'HIGH' : 'MEDIUM',
+        limitations:
+          'Key exchange is quantum-safe. Certificate signature must still be evaluated independently for end-to-end post-quantum safety.',
         recommendation: {
           recommendedAlgorithm: 'Maintain ML-KEM Key Establishment',
           rationale: 'Protects network sessions from retroactive quantum decryption.',
@@ -157,16 +206,21 @@ export function evaluateAlgorithm(
     return {
       title: `Quantum-Vulnerable Key Establishment (${rawAlgo})`,
       algorithmOrConfig: rawAlgo,
+      observedValue,
       purpose: 'KEY_ESTABLISHMENT',
       riskLevel: 'HIGH',
       riskReason:
         'Immediate Store Now, Decrypt Later (SNDL) threat: adversary state actors record encrypted sessions today to decrypt retrospectively once a quantum computer is available. Shor\'s algorithm solves discrete log key exchange.',
+      evidenceSource,
+      ruleId: 'NIST-PQC-VULN-KEM',
       standardRef: 'NIST FIPS 203',
-      confidence: 'HIGH',
+      confidence: evidenceSource === 'scanner_verified' ? 'HIGH' : 'MEDIUM',
+      limitations:
+        'Evaluates ephemeral/static session key agreement against Store-Now-Decrypt-Later (SNDL) attacks. Does not evaluate bulk data encryption cipher.',
       recommendation: {
         recommendedAlgorithm: 'ML-KEM-768 (NIST FIPS 203) / Hybrid X25519MLKEM768',
         rationale:
-          'ML-KEM-768 provides Security Category 3 (equivalent to AES-192) lattice-based key encapsulation resistant to all known quantum and classical attacks.',
+          'ML-KEM-768 provides Security Category 3 (equivalent to AES-192) lattice-based key encapsulation resistant to all known quantum and classical attacks. Never substitute a digital signature algorithm (ML-DSA) for key exchange.',
         whyAppropriate:
           'Seamlessly integrated into TLS 1.3 and SSH protocols as a hybrid key exchange group, protecting both present and future confidentiality.',
         compatibilityNotes:
@@ -195,11 +249,16 @@ export function evaluateAlgorithm(
       return {
         title: `Classically Broken & Quantum-Vulnerable Cipher (${rawAlgo})`,
         algorithmOrConfig: rawAlgo,
+        observedValue,
         purpose: 'SYMMETRIC_ENCRYPTION',
         riskLevel: 'CRITICAL',
-        riskReason: 'Vulnerable to known classical cryptanalysis (Sweet32, key recovery) and trivially broken by quantum search.',
+        riskReason:
+          'Vulnerable to known classical cryptanalysis (Sweet32, key recovery) and trivially broken by quantum search.',
+        evidenceSource,
+        ruleId: 'NIST-SP800-131A-BROKEN-CIPHER',
         standardRef: 'NIST SP 800-131A',
-        confidence: 'HIGH',
+        confidence: evidenceSource === 'scanner_verified' ? 'HIGH' : 'MEDIUM',
+        limitations: 'Cipher suite identified in negotiated parameters or asset configuration.',
         recommendation: {
           recommendedAlgorithm: 'AES-256-GCM',
           rationale: 'AES-256 provides both classical and 128-bit quantum security strength under Grover\'s algorithm.',
@@ -216,12 +275,17 @@ export function evaluateAlgorithm(
       return {
         title: `128-Bit Symmetric Key Strength Under Quantum Attack (${rawAlgo})`,
         algorithmOrConfig: rawAlgo,
+        observedValue,
         purpose: 'SYMMETRIC_ENCRYPTION',
         riskLevel: 'MEDIUM',
         riskReason:
-          'Grover\'s quantum search algorithm halves effective brute-force key length to 64 bits of security, which is near brute-force feasibility for nation-state supercomputing.',
+          'Grover\'s quantum search algorithm halves effective brute-force key length to 64 bits of security, which is near brute-force feasibility for nation-state supercomputing. Not vulnerable in the same way as RSA or ECDH, but has a diminished security margin.',
+        evidenceSource,
+        ruleId: 'CNSA2-AES128-MARGIN',
         standardRef: 'CNSA 2.0 / NIST SP 800-57',
-        confidence: 'HIGH',
+        confidence: evidenceSource === 'scanner_verified' ? 'HIGH' : 'MEDIUM',
+        limitations:
+          'AES-128 is not broken by Shor\'s algorithm, but Grover search reduces effective security margin.',
         recommendation: {
           recommendedAlgorithm: 'AES-256-GCM',
           rationale: 'AES-256 preserves a comfortable 128 bits of security margin against quantum Grover search.',
@@ -241,11 +305,16 @@ export function evaluateAlgorithm(
     return {
       title: `Quantum-Resistant Symmetric Cipher (${rawAlgo})`,
       algorithmOrConfig: rawAlgo,
+      observedValue,
       purpose: 'SYMMETRIC_ENCRYPTION',
       riskLevel: 'LOW',
-      riskReason: 'Retains 128 bits of effective quantum security against Grover\'s search algorithm. Computational recovery remains infeasible.',
+      riskReason:
+        'Retains 128 bits of effective quantum security against Grover\'s search algorithm. Computational recovery remains infeasible on any quantum computer.',
+      evidenceSource,
+      ruleId: 'NIST-SP800-57-SYM-PQC',
       standardRef: 'NIST SP 800-57 Part 1',
-      confidence: 'HIGH',
+      confidence: evidenceSource === 'scanner_verified' ? 'HIGH' : 'MEDIUM',
+      limitations: 'Symmetric cipher key length evaluated. Key management and rotation must be audited separately.',
       recommendation: {
         recommendedAlgorithm: 'Retain AES-256 / ChaCha20-Poly1305',
         rationale: 'Symmetric encryption with 256-bit keys remains quantum-resistant without algorithm replacement.',
@@ -264,11 +333,15 @@ export function evaluateAlgorithm(
       return {
         title: `Classically Broken Hash Function (${rawAlgo})`,
         algorithmOrConfig: rawAlgo,
+        observedValue,
         purpose: 'HASH_FUNCTION',
         riskLevel: 'CRITICAL',
         riskReason: 'Practical collision attacks exist classically. Cryptanalytically broken.',
+        evidenceSource,
+        ruleId: 'NIST-SP800-131A-BROKEN-HASH',
         standardRef: 'NIST SP 800-131A',
-        confidence: 'HIGH',
+        confidence: evidenceSource === 'scanner_verified' ? 'HIGH' : 'MEDIUM',
+        limitations: 'Hash function assessed in isolation.',
         recommendation: {
           recommendedAlgorithm: 'SHA-384 or SHA-512',
           rationale: 'Provides long-term post-quantum collision and preimage resistance.',
@@ -284,11 +357,16 @@ export function evaluateAlgorithm(
     return {
       title: `Post-Quantum Secure Hash Function (${rawAlgo})`,
       algorithmOrConfig: rawAlgo,
+      observedValue,
       purpose: 'HASH_FUNCTION',
       riskLevel: 'LOW',
-      riskReason: 'Cryptographic hash functions of 256 bits or greater maintain ample security margin against quantum collision attacks.',
+      riskReason:
+        'Cryptographic hash functions of 256 bits or greater maintain ample security margin against quantum collision attacks.',
+      evidenceSource,
+      ruleId: 'NIST-FIPS-180-4-HASH',
       standardRef: 'NIST FIPS 180-4',
-      confidence: 'HIGH',
+      confidence: evidenceSource === 'scanner_verified' ? 'HIGH' : 'MEDIUM',
+      limitations: 'Hash function collision resistance evaluated under classical and quantum models.',
       recommendation: {
         recommendedAlgorithm: 'Retain SHA-256 / Upgrade to SHA-384 for CNSA 2.0',
         rationale: 'Strong resistance against Grover and Brassard-Høyer-Tapp collision algorithms.',
@@ -301,22 +379,26 @@ export function evaluateAlgorithm(
     };
   }
 
-  // 5. UNKNOWN / INSUFFICIENT EVIDENCE - NO GUESSING!
+  // 5. UNKNOWN / INSUFFICIENT EVIDENCE - STRICT TRACEABILITY
   return {
-    title: `Unverified Cryptographic Configuration (${rawAlgo})`,
-    algorithmOrConfig: rawAlgo,
+    title: `Unverified Cryptographic Configuration (${rawAlgo || 'Unknown'})`,
+    algorithmOrConfig: rawAlgo || 'Unknown',
+    observedValue,
     purpose: 'PROTOCOL',
-    riskLevel: 'MEDIUM',
+    riskLevel: 'INFORMATIONAL',
     riskReason:
-      'The reported algorithm or configuration could not be deterministically mapped to a standardized post-quantum classification. Additional cryptographic evidence is required.',
+      'The reported algorithm or configuration could not be deterministically mapped to a standardized post-quantum classification. Additional cryptographic evidence is required before a risk score or migration plan can be assigned.',
+    evidenceSource,
+    ruleId: 'UNKNOWN-CRYPTOGRAPHIC-EVIDENCE',
     standardRef: 'NIST PQC Assessment Guidance',
     confidence: 'NEEDS_VERIFICATION',
+    limitations:
+      'Insufficient evidence to identify cryptographic primitive, key size, or operational purpose. Migration recommendation cannot be finalized until evidence is provided.',
     recommendation: {
       recommendedAlgorithm: 'Perform Cryptographic Inventory & Evidence Collection',
       rationale:
         'Deterministic security decisions require verified algorithm identifiers and operational purposes rather than estimations.',
-      whyAppropriate:
-        'Prevents erroneous migrations and ensures accurate institutional risk reporting.',
+      whyAppropriate: 'Prevents erroneous migrations and ensures accurate institutional risk reporting.',
       compatibilityNotes: 'Verify with system vendors, software dependencies, or run live TLS inspection.',
       migrationSteps: [
         'Inspect server configuration files or source code dependencies',
@@ -324,16 +406,24 @@ export function evaluateAlgorithm(
         'Consult software vendor documentation for exact cryptographic primitives used',
       ],
       standardRef: 'NIST PQC Migration Playbook',
-      urgency: 'MEDIUM',
+      urgency: 'LOW',
     },
   };
 }
 
-function inferPurpose(algo: string): 'DIGITAL_SIGNATURE' | 'KEY_ESTABLISHMENT' | 'SYMMETRIC_ENCRYPTION' | 'HASH_FUNCTION' | 'PROTOCOL' {
+function inferPurpose(
+  algo: string
+): 'DIGITAL_SIGNATURE' | 'KEY_ESTABLISHMENT' | 'SYMMETRIC_ENCRYPTION' | 'HASH_FUNCTION' | 'PROTOCOL' {
   if (algo.includes('RSA') || algo.includes('ECDSA') || algo.includes('DSA') || algo.includes('SIGN')) {
     return 'DIGITAL_SIGNATURE';
   }
-  if (algo.includes('ECDH') || algo.includes('DHE') || algo.includes('DIFFIE') || algo.includes('KEM') || algo.includes('EXCHANGE')) {
+  if (
+    algo.includes('ECDH') ||
+    algo.includes('DHE') ||
+    algo.includes('DIFFIE') ||
+    algo.includes('KEM') ||
+    algo.includes('EXCHANGE')
+  ) {
     return 'KEY_ESTABLISHMENT';
   }
   if (algo.includes('AES') || algo.includes('CHACHA') || algo.includes('DES') || algo.includes('CIPHER')) {
@@ -370,24 +460,32 @@ export async function runAssessmentForAsset(assetId: string): Promise<Assessment
 
   if (scanResult) {
     // Certificate public key
-    if (scanResult.certPubKeyAlgo) {
+    if (scanResult.certPubKeyAlgo && scanResult.certPubKeyAlgo !== 'Unknown') {
       const algoStr = `${scanResult.certPubKeyAlgo}${scanResult.certKeySize ? `-${scanResult.certKeySize}` : ''}`;
       findingsToCreate.push(
-        evaluateAlgorithm(algoStr, 'DIGITAL_SIGNATURE', 'VERIFIED_SCAN')
+        evaluateAlgorithm(algoStr, 'DIGITAL_SIGNATURE', 'scanner_verified')
+      );
+    } else {
+      findingsToCreate.push(
+        evaluateAlgorithm('Unknown Certificate Key Algorithm', 'DIGITAL_SIGNATURE', 'scanner_verified')
       );
     }
 
     // Key exchange mechanism
-    if (scanResult.keyExchangeGroup) {
+    if (scanResult.keyExchangeGroup && scanResult.keyExchangeGroup !== 'Unknown Key Exchange') {
       findingsToCreate.push(
-        evaluateAlgorithm(scanResult.keyExchangeGroup, 'KEY_ESTABLISHMENT', 'VERIFIED_SCAN')
+        evaluateAlgorithm(scanResult.keyExchangeGroup, 'KEY_ESTABLISHMENT', 'scanner_verified')
+      );
+    } else {
+      findingsToCreate.push(
+        evaluateAlgorithm('Unknown Key Exchange Mechanism', 'KEY_ESTABLISHMENT', 'scanner_verified')
       );
     }
 
     // Cipher suite
     if (scanResult.cipherSuiteNegotiated) {
       findingsToCreate.push(
-        evaluateAlgorithm(scanResult.cipherSuiteNegotiated, 'SYMMETRIC_ENCRYPTION', 'VERIFIED_SCAN')
+        evaluateAlgorithm(scanResult.cipherSuiteNegotiated, 'SYMMETRIC_ENCRYPTION', 'scanner_verified')
       );
     }
   }
@@ -399,76 +497,129 @@ export async function runAssessmentForAsset(assetId: string): Promise<Assessment
       const json = JSON.parse(asset.knownAlgorithms);
       parsed = Array.isArray(json) ? json : [json];
     } catch {
-      // Split by comma
       parsed = asset.knownAlgorithms.split(',').map((item) => ({ algorithm: item.trim() }));
     }
+
+    // Map source strictly
+    const sourceForInventory = normalizeEvidenceSource(asset.informationSource);
 
     for (const item of parsed) {
       const rawAlgo = item.algorithm || item.name || String(item);
       const purpose = item.purpose;
-      if (rawAlgo && rawAlgo !== '[object Object]') {
-        // Avoid duplicate findings if already evaluated from scan
+      if (rawAlgo && rawAlgo !== '[object Object]' && rawAlgo.trim() !== '') {
         const alreadyFound = findingsToCreate.some(
           (f) => f.algorithmOrConfig.toLowerCase() === rawAlgo.toLowerCase()
         );
         if (!alreadyFound) {
           findingsToCreate.push(
-            evaluateAlgorithm(rawAlgo, purpose, asset.informationSource)
+            evaluateAlgorithm(rawAlgo, purpose, sourceForInventory)
           );
         }
       }
     }
   }
 
-  // 3. Fallback: If no algorithms known and no scan, flag as Needs Verification
+  // 3. Fallback: If no algorithms known and no scan, record honest unassessed state
   if (findingsToCreate.length === 0) {
     findingsToCreate.push(
-      evaluateAlgorithm('Unknown Cryptographic Configuration', undefined, asset.informationSource)
+      evaluateAlgorithm('Unassessed Asset — No Cryptographic Evidence Available', undefined, 'inferred')
     );
   }
 
-  // Calculate Quantum Risk Score (0 - 100)
-  // Scoring formula: Critical (35 pts each), High (25 pts each), Medium (10 pts each), Low (0 pts)
+  // Calculate deterministic score with explicit breakdown
+  const contributingFindings: Array<{
+    title: string;
+    algorithm: string;
+    riskLevel: string;
+    pointsAdded: number;
+    ruleId: string;
+  }> = [];
+
   let rawScore = 0;
   let hasCritical = false;
   let hasHigh = false;
   let hasPq = false;
+  let hasDefensibleEvidence = false;
 
   for (const f of findingsToCreate) {
+    if (f.ruleId === 'UNKNOWN-CRYPTOGRAPHIC-EVIDENCE') {
+      contributingFindings.push({
+        title: f.title,
+        algorithm: f.algorithmOrConfig,
+        riskLevel: f.riskLevel,
+        pointsAdded: 0,
+        ruleId: f.ruleId,
+      });
+      continue;
+    }
+
+    hasDefensibleEvidence = true;
+    let points = 0;
     if (f.riskLevel === 'CRITICAL') {
-      rawScore += 35;
+      points = 35;
       hasCritical = true;
     } else if (f.riskLevel === 'HIGH') {
-      rawScore += 25;
+      points = 25;
       hasHigh = true;
     } else if (f.riskLevel === 'MEDIUM') {
-      rawScore += 10;
+      points = 10;
     } else if (f.riskLevel === 'LOW') {
+      points = 0;
       hasPq = true;
+    }
+
+    rawScore += points;
+    contributingFindings.push({
+      title: f.title,
+      algorithm: f.algorithmOrConfig,
+      riskLevel: f.riskLevel,
+      pointsAdded: points,
+      ruleId: f.ruleId,
+    });
+  }
+
+  // Adjust for data sensitivity if defensible evidence exists
+  let sensitivityMultiplier = 1.0;
+  if (hasDefensibleEvidence && (asset.dataSensitivity === 'HIGHLY_SENSITIVE' || asset.dataSensitivity === 'REGULATED')) {
+    sensitivityMultiplier = 1.25;
+    rawScore = Math.round(rawScore * sensitivityMultiplier);
+  }
+
+  let quantumRiskScore = 0;
+  let overallReadinessStatus: AssessmentResult['overallReadinessStatus'] = 'NOT_ASSESSED';
+
+  if (!hasDefensibleEvidence) {
+    quantumRiskScore = 0;
+    overallReadinessStatus = 'NOT_ASSESSED';
+  } else {
+    quantumRiskScore = Math.min(100, Math.max(0, rawScore));
+    if (quantumRiskScore >= 70) {
+      overallReadinessStatus = 'QUANTUM_VULNERABLE';
+    } else if (quantumRiskScore >= 40) {
+      overallReadinessStatus = 'TRANSITION_REQUIRED';
+    } else if (hasPq && (hasHigh || hasCritical)) {
+      overallReadinessStatus = 'HYBRID_READY';
+    } else {
+      overallReadinessStatus = 'POST_QUANTUM_READY';
     }
   }
 
-  // Adjust score for sensitivity: Highly sensitive or regulated data magnifies risk
-  if (asset.dataSensitivity === 'HIGHLY_SENSITIVE' || asset.dataSensitivity === 'REGULATED') {
-    rawScore = Math.round(rawScore * 1.25);
-  }
+  const scoreBreakdownJson = JSON.stringify({
+    ruleVersion: '2024.1-NIST-FIPS',
+    calculatedAt: new Date().toISOString(),
+    hasDefensibleEvidence,
+    basePoints: rawScore,
+    sensitivityMultiplier,
+    finalScore: quantumRiskScore,
+    status: overallReadinessStatus,
+    contributingFindings,
+  });
 
-  const quantumRiskScore = Math.min(100, Math.max(5, rawScore));
+  const summary = hasDefensibleEvidence
+    ? `Post-quantum evaluation completed for "${asset.name}" (${asset.identifier}). Evaluated ${findingsToCreate.length} cryptographic item(s). Quantum Risk Score: ${quantumRiskScore}/100. Status: ${overallReadinessStatus.replace(/_/g, ' ')}.`
+    : `Assessment for "${asset.name}" (${asset.identifier}) is incomplete: No defensible cryptographic evidence found. Status: Not Assessed. Run a TLS scan or import verified cryptographic inventory.`;
 
-  let overallReadinessStatus: AssessmentResult['overallReadinessStatus'] = 'QUANTUM_VULNERABLE';
-  if (quantumRiskScore >= 70) {
-    overallReadinessStatus = 'QUANTUM_VULNERABLE';
-  } else if (quantumRiskScore >= 40) {
-    overallReadinessStatus = 'TRANSITION_REQUIRED';
-  } else if (hasPq && (hasHigh || hasCritical)) {
-    overallReadinessStatus = 'HYBRID_READY';
-  } else if (quantumRiskScore < 25) {
-    overallReadinessStatus = 'POST_QUANTUM_READY';
-  }
-
-  const summary = `Post-quantum evaluation completed for "${asset.name}" (${asset.identifier}). Detected ${findingsToCreate.length} cryptographic item(s). Quantum Risk Score: ${quantumRiskScore}/100. Status: ${overallReadinessStatus.replace(/_/g, ' ')}.`;
-
-  // Persist Assessment, Findings, and Recommendations in database
+  // Persist Assessment in database
   const createdAssessment = await prisma.assessment.create({
     data: {
       assetId: asset.id,
@@ -477,12 +628,13 @@ export async function runAssessmentForAsset(assetId: string): Promise<Assessment
       quantumRiskScore,
       overallReadinessStatus,
       summary,
+      scoreBreakdown: scoreBreakdownJson,
       methodology:
         'Deterministic rule-based assessment against NIST FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), FIPS 205 (SLH-DSA), and NSA CNSA 2.0 standards.',
     },
   });
 
-  // Remove previous un-remediated findings for this asset to prevent clutter
+  // Remove previous un-remediated findings for this asset
   await prisma.finding.deleteMany({
     where: {
       assetId: asset.id,
@@ -497,12 +649,15 @@ export async function runAssessmentForAsset(assetId: string): Promise<Assessment
         assetId: asset.id,
         title: item.title,
         algorithmOrConfig: item.algorithmOrConfig,
+        observedValue: item.observedValue,
         purpose: item.purpose,
         riskLevel: item.riskLevel,
         riskReason: item.riskReason,
-        evidenceSource: asset.informationSource,
+        evidenceSource: item.evidenceSource,
+        ruleId: item.ruleId,
         standardRef: item.standardRef,
         confidence: item.confidence,
+        limitations: item.limitations,
         status: 'OPEN',
         priority: item.riskLevel === 'CRITICAL' ? 'CRITICAL' : item.riskLevel === 'HIGH' ? 'HIGH' : 'MEDIUM',
       },
@@ -531,6 +686,8 @@ export async function runAssessmentForAsset(assetId: string): Promise<Assessment
           ? 'HIGH_RISK'
           : overallReadinessStatus === 'TRANSITION_REQUIRED'
           ? 'ASSESSED'
+          : overallReadinessStatus === 'NOT_ASSESSED'
+          ? 'PENDING'
           : 'LOW_RISK',
     },
   });
@@ -542,6 +699,7 @@ export async function runAssessmentForAsset(assetId: string): Promise<Assessment
     summary,
     methodology: createdAssessment.methodology,
     ruleVersion: createdAssessment.ruleVersion,
+    scoreBreakdown: scoreBreakdownJson,
     findings: findingsToCreate,
   };
 }

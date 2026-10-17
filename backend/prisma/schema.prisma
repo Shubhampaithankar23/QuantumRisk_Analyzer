@@ -100,6 +100,7 @@ model ScanResult {
   isPqHybrid            Boolean   @default(false)
   ocspStapled           Boolean   @default(false)
   rawDetails            String?   // Full structured JSON output
+  scannerVersion        String?   // Scanner engine identifier & version (e.g. Node-TLS/OpenSSL-3.0.13)
   createdAt             DateTime  @default(now())
 }
 
@@ -109,10 +110,11 @@ model Assessment {
   asset                  Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
   title                  String
   ruleVersion            String    @default("2024.1-NIST-FIPS")
-  quantumRiskScore       Int       // 0 - 100
-  overallReadinessStatus String    // QUANTUM_VULNERABLE, TRANSITION_REQUIRED, HYBRID_READY, POST_QUANTUM_READY
+  quantumRiskScore       Int       // 0 - 100 (-1 or 0 for Not Assessed)
+  overallReadinessStatus String    // QUANTUM_VULNERABLE, TRANSITION_REQUIRED, HYBRID_READY, POST_QUANTUM_READY, NOT_ASSESSED
   summary                String
   methodology            String
+  scoreBreakdown         String?   // Deterministic JSON breakdown of findings contributing to score
   assessedAt             DateTime  @default(now())
   findings               Finding[]
 }
@@ -125,12 +127,15 @@ model Finding {
   asset             Asset             @relation(fields: [assetId], references: [id], onDelete: Cascade)
   title             String
   algorithmOrConfig String
+  observedValue     String?           // Actual observed value from scan or evidence
   purpose           String            // DIGITAL_SIGNATURE, KEY_ESTABLISHMENT, SYMMETRIC_ENCRYPTION, HASH_FUNCTION, PROTOCOL
   riskLevel         String            // CRITICAL, HIGH, MEDIUM, LOW, INFORMATIONAL
   riskReason        String
-  evidenceSource    String            // VERIFIED_SCAN, IMPORTED_EVIDENCE, MANUAL_ENTRY, SYSTEM_INFERRED
+  evidenceSource    String            // scanner_verified, imported, user_reported, inferred
   standardRef       String            // e.g., NIST FIPS 204, NIST FIPS 203
+  ruleId            String?           // e.g., NIST-FIPS-204-SIG, NIST-FIPS-203-KEM
   confidence        String            @default("HIGH") // HIGH, MEDIUM, NEEDS_VERIFICATION
+  limitations       String?           // Limitations of the assessment/evidence scope
   status            String            @default("OPEN") // OPEN, IN_PROGRESS, RESOLVED, ACCEPTED_RISK
   owner             String?
   priority          String            @default("HIGH") // CRITICAL, HIGH, MEDIUM, LOW
