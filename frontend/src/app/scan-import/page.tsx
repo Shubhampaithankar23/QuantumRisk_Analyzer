@@ -11,15 +11,13 @@ import {
   FileCode,
   ShieldCheck,
   ShieldAlert,
-  AlertTriangle,
+  AlertCircle,
   CheckCircle2,
-  XCircle,
   RefreshCw,
   ArrowRight,
   Info,
-  Clock,
-  ExternalLink,
   Trash2,
+  Download,
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import { fetchApi } from '@/lib/api';
@@ -65,7 +63,7 @@ export default function ScanAndImportPage() {
   const handleStartScan = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!confirmAuth) {
-      setScanError('You must explicitly confirm authorization before scanning this endpoint.');
+      setScanError('Please check the confirmation box to confirm you have permission to test this website.');
       return;
     }
 
@@ -164,514 +162,382 @@ export default function ScanAndImportPage() {
         setPreviewData(null);
       }
     } catch (err: any) {
-      setImportError(err.message || 'Failed to commit imported assets to database');
+      setImportError(err.message || 'Failed to import assets');
     } finally {
       setImporting(false);
     }
   };
 
+  // Sample CSV generator
+  const downloadSampleCsv = () => {
+    const csvContent =
+      'name,identifier,assetType,dataSensitivity,knownAlgorithms,tlsVersion,port,notes\n' +
+      'Main Campus Portal,portal.campus.edu,WEBSITE,CONFIDENTIAL,"RSA-2048, ECDHE-P256, AES-128-GCM",TLSv1.3,443,Primary student portal\n' +
+      'Library Digital Repository,library.campus.edu,WEBSITE,PUBLIC,"RSA-2048, AES-256-GCM",TLSv1.3,443,Open access research papers\n' +
+      'Research Compute Node,hpc.campus.edu,SERVER,HIGHLY_SENSITIVE,"ECDSA-P384, X25519, AES-256-GCM",TLSv1.3,443,Biomedical data processing\n';
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'sample-assets-template.csv';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-slate-50">
       <Header
         title="Scan & Import Center"
-        subtitle="Live authorized TLS cryptographic scanning and bulk asset inventory ingestion (CSV, XLSX, JSON)."
+        subtitle="Quickly check any website's quantum safety or import an existing list of systems."
       />
 
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
-        {/* Tab Switcher */}
-        <div className="flex border-b border-slate-200">
+      <div className="p-6 max-w-5xl mx-auto space-y-6">
+        {/* Simple 2-Tab Selector */}
+        <div className="bg-white p-1.5 rounded-xl border border-slate-200 shadow-sm flex gap-2">
           <button
             onClick={() => setActiveTab('scan')}
-            className={`pb-3 px-4 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors ${
+            className={`flex-1 py-2.5 px-4 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition ${
               activeTab === 'scan'
-                ? 'border-navy-900 text-navy-900'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
+                ? 'bg-navy-900 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
-            <Radio className="w-4 h-4 text-pqgreen-500" />
-            Authorized TLS Scanner
+            <Radio className="w-4 h-4 text-emerald-400" />
+            Option 1: Check a Website Live
           </button>
           <button
             onClick={() => setActiveTab('import')}
-            className={`pb-3 px-4 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors ${
+            className={`flex-1 py-2.5 px-4 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition ${
               activeTab === 'import'
-                ? 'border-navy-900 text-navy-900'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
+                ? 'bg-navy-900 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
-            <UploadCloud className="w-4 h-4 text-pqgreen-500" />
-            Bulk Multi-File Import
+            <UploadCloud className="w-4 h-4 text-blue-400" />
+            Option 2: Import Systems File (CSV / Excel)
           </button>
         </div>
 
-        {/* TAB 1: AUTHORIZED TLS SCANNER */}
+        {/* TAB 1: WEBSITE SCANNER */}
         {activeTab === 'scan' && (
           <div className="space-y-6">
-            <div className="bg-white p-6 rounded-lg border border-slate-200 shadow-sm">
-              <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-                <Radio className="w-4 h-4 text-pqgreen-600" />
-                Live Cryptographic & TLS Configuration Inspection
-              </h2>
-              <p className="text-xs text-slate-500 mt-1">
-                Performs deterministic TLS handshake probes against an authorized endpoint to identify
-                supported TLS versions, cipher suites, certificate public keys, and observable key exchange groups.
-              </p>
+            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+              <div>
+                <h2 className="text-base font-bold text-slate-900">Check Any Website</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  We will test the website's HTTPS connection to see what encryption it uses and if quantum computers could break it.
+                </p>
+              </div>
 
               {scanError && (
-                <div className="mt-4 p-3.5 rounded bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-semibold">Scan Target Rejection / Error</p>
-                    <p className="mt-0.5">{scanError}</p>
-                  </div>
+                <div className="p-3.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{scanError}</span>
                 </div>
               )}
 
-              <form onSubmit={handleStartScan} className="mt-5 space-y-4 text-xs">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                  <div className="md:col-span-3">
-                    <label className="block font-medium text-slate-700 mb-1">
-                      Authorized FQDN Hostname *
+              <form onSubmit={handleStartScan} className="space-y-4 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div className="sm:col-span-3">
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      Website Address (Domain Name)
                     </label>
                     <input
                       type="text"
                       required
-                      placeholder="e.g. portal.apex.edu or mit.edu"
+                      placeholder="e.g. portal.apex.edu or harvard.edu"
                       value={scanTarget}
                       onChange={(e) => setScanTarget(e.target.value)}
-                      className="w-full px-3 py-2 text-xs rounded border border-slate-200 focus:outline-none focus:ring-1 focus:ring-navy-900 font-mono"
+                      className="w-full px-3.5 py-2.5 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
                     />
                   </div>
 
                   <div>
-                    <label className="block font-medium text-slate-700 mb-1">Port</label>
-                    <select
+                    <label className="block font-semibold text-slate-700 mb-1">Port</label>
+                    <input
+                      type="number"
                       value={scanPort}
-                      onChange={(e) => setScanPort(parseInt(e.target.value, 10))}
-                      className="w-full px-3 py-2 text-xs rounded border border-slate-200 focus:outline-none focus:ring-1 focus:ring-navy-900 bg-white"
-                    >
-                      <option value={443}>443 (HTTPS)</option>
-                      <option value={8443}>8443 (Alt HTTPS)</option>
-                    </select>
+                      onChange={(e) => setScanPort(parseInt(e.target.value, 10) || 443)}
+                      className="w-full px-3.5 py-2.5 text-xs rounded-lg border border-slate-300 font-mono"
+                    />
                   </div>
                 </div>
 
-                {/* Authorization Confirmation Checkbox */}
-                <div className="p-3.5 bg-slate-50 rounded border border-slate-200 space-y-2">
+                <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200">
                   <label className="flex items-start gap-2.5 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={confirmAuth}
                       onChange={(e) => setConfirmAuth(e.target.checked)}
-                      className="mt-0.5 w-4 h-4 rounded text-navy-900 focus:ring-navy-900 border-slate-300"
+                      className="mt-0.5 w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300"
                     />
-                    <span className="text-xs text-slate-700 leading-relaxed font-medium">
-                      I confirm that I am explicitly authorized by my institution or domain owner to
-                      inspect the TLS configuration of this target host.
+                    <span className="text-xs text-slate-800 font-medium leading-relaxed">
+                      I confirm that I am authorized by my institution to test this website.
                     </span>
                   </label>
-                  <p className="text-[11px] text-slate-500 pl-6 leading-relaxed">
-                    <span className="font-semibold text-slate-700">Security Enforcement:</span> All targets
-                    are validated against Server-Side Request Forgery (SSRF) rules. Loopback (127.0.0.1),
-                    RFC1918 private IP addresses (10.x, 192.168.x, 172.16-31.x), and cloud metadata endpoints
-                    are strictly denied.
-                  </p>
                 </div>
 
-                <div className="flex justify-end">
-                  <button
-                    type="submit"
-                    disabled={scanning || !confirmAuth || !scanTarget.trim()}
-                    className="px-4 py-2 bg-navy-900 hover:bg-navy-850 text-white font-medium rounded shadow-sm disabled:opacity-50 flex items-center gap-2"
-                  >
-                    {scanning ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin text-pqgreen-400" />
-                        Executing Handshake Probes...
-                      </>
-                    ) : (
-                      <>
-                        <Radio className="w-4 h-4 text-pqgreen-400" />
-                        Initiate Authorized Scan
-                      </>
-                    )}
-                  </button>
-                </div>
+                <button
+                  type="submit"
+                  disabled={scanning || !confirmAuth || !scanTarget.trim()}
+                  className="w-full sm:w-auto px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-sm disabled:opacity-50 flex items-center justify-center gap-2 transition"
+                >
+                  {scanning ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      Testing Encryption...
+                    </>
+                  ) : (
+                    <>
+                      <Radio className="w-4 h-4" />
+                      Start Security Scan
+                    </>
+                  )}
+                </button>
               </form>
             </div>
 
-            {/* Live Scan Results Display */}
+            {/* Scan Results Card */}
             {scanResult && (
-              <div className="bg-white p-6 rounded-lg border border-slate-200 shadow-sm space-y-5 animate-in fade-in duration-300">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200">
+              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4 animate-in fade-in duration-200">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
                   <div>
-                    <span className="inline-block px-2 py-0.5 text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 rounded mb-1">
-                      TLS Handshake Verified ({scanResult.executionTimeMs}ms)
+                    <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                      Scan Complete ({scanResult.executionTimeMs} ms)
                     </span>
-                    <h3 className="text-base font-bold text-slate-900 font-mono">
-                      {scanResult.targetHost}:{scanResult.port}
+                    <h3 className="text-lg font-bold text-slate-900 mt-1 font-mono">
+                      {scanResult.targetHost}
                     </h3>
-                    <p className="text-xs text-slate-500">
-                      Resolved IP: {scanResult.result.resolvedIp} • Timestamp:{' '}
-                      {formatDate(new Date())}
-                    </p>
                   </div>
 
-                  {scanResult.linkedAssetId && (
-                    <Link
-                      href="/assessments"
-                      className="px-3.5 py-1.5 bg-pqgreen-600 hover:bg-pqgreen-700 text-white text-xs font-medium rounded flex items-center gap-1.5 shadow-sm transition"
-                    >
-                      Assess Quantum Risk &rarr;
-                    </Link>
-                  )}
+                  <Link
+                    href="/assessments"
+                    className="px-4 py-2 bg-navy-900 hover:bg-navy-850 text-white text-xs font-bold rounded-lg flex items-center gap-1.5 shadow-sm transition"
+                  >
+                    View Risk Assessment &rarr;
+                  </Link>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
-                  <div className="p-3.5 bg-slate-50 rounded border border-slate-200">
-                    <span className="text-slate-400 block text-[11px]">Negotiated TLS Version</span>
-                    <span className="font-semibold text-slate-900 text-sm font-mono mt-0.5 block">
-                      {scanResult.result.tlsVersionNegotiated || 'None'}
-                    </span>
-                    <span className="text-[10px] text-slate-500 mt-1 block">
-                      Supported: {scanResult.result.supportedTlsVersions?.join(', ')}
-                    </span>
-                  </div>
-
-                  <div className="p-3.5 bg-slate-50 rounded border border-slate-200">
-                    <span className="text-slate-400 block text-[11px]">Certificate Public Key</span>
-                    <span className="font-semibold text-slate-900 text-sm font-mono mt-0.5 block">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200">
+                    <span className="text-slate-500 block text-[11px]">Certificate Algorithm</span>
+                    <span className="font-bold text-slate-900 text-sm mt-0.5 block">
                       {scanResult.result.certPubKeyAlgo} ({scanResult.result.certKeySize} bits)
                     </span>
-                    <span className="text-[10px] text-red-600 font-medium mt-1 block">
-                      Vulnerable to Shor\'s Algorithm
+                    <span className="text-[11px] text-red-600 font-semibold block mt-1">
+                      ⚠️ Quantum-Vulnerable (Needs ML-DSA)
                     </span>
                   </div>
 
-                  <div className="p-3.5 bg-slate-50 rounded border border-slate-200">
-                    <span className="text-slate-400 block text-[11px]">Key Exchange Mechanism</span>
-                    <span className="font-semibold text-slate-900 text-sm font-mono mt-0.5 block">
+                  <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200">
+                    <span className="text-slate-500 block text-[11px]">Key Exchange</span>
+                    <span className="font-bold text-slate-900 text-sm mt-0.5 block truncate">
                       {scanResult.result.keyExchangeGroup}
                     </span>
-                    <span className="text-[10px] text-amber-600 font-medium mt-1 block">
-                      {scanResult.result.isPqHybrid ? 'Hybrid PQ Group Active' : 'SNDL Exposure Risk'}
+                    <span className="text-[11px] text-orange-600 font-semibold block mt-1">
+                      ⚠️ Classical Exchange (Needs ML-KEM)
                     </span>
                   </div>
 
-                  <div className="p-3.5 bg-slate-50 rounded border border-slate-200">
-                    <span className="text-slate-400 block text-[11px]">Certificate Expiration</span>
-                    <span className="font-semibold text-slate-900 text-sm mt-0.5 block">
-                      {formatDate(scanResult.result.certValidTo)}
+                  <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200">
+                    <span className="text-slate-500 block text-[11px]">TLS Version</span>
+                    <span className="font-bold text-slate-900 text-sm mt-0.5 block">
+                      {scanResult.result.tlsVersionNegotiated || 'TLS 1.2/1.3'}
                     </span>
-                    <span className="text-[10px] text-slate-500 mt-1 block truncate">
-                      Issuer: {scanResult.result.certIssuer}
+                    <span className="text-[11px] text-slate-500 block mt-1">
+                      Cipher: {scanResult.result.cipherSuiteNegotiated}
                     </span>
                   </div>
-                </div>
-
-                <div className="p-3.5 bg-slate-900 text-slate-200 font-mono text-[11px] rounded space-y-1">
-                  <p className="text-slate-400 font-semibold mb-1">Negotiated Cipher Suite & Details:</p>
-                  <p>Cipher: {scanResult.result.cipherSuiteNegotiated}</p>
-                  <p>Signature Algorithm: {scanResult.result.certSignatureAlgo}</p>
-                  <p>Subject: {scanResult.result.certSubject}</p>
                 </div>
               </div>
             )}
 
-            {/* Previous Scans Table */}
-            <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
-              <h3 className="text-sm font-semibold text-slate-900 pb-3 border-b border-slate-100 flex items-center justify-between">
-                <span>Recent TLS Inspection Audit Log</span>
-                <button
-                  onClick={loadScanHistory}
-                  className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1 font-normal"
-                >
-                  <RefreshCw className="w-3 h-3" /> Refresh
-                </button>
-              </h3>
-
-              <div className="mt-3 overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
-                      <th className="py-2.5 px-3">Target Host</th>
-                      <th className="py-2.5 px-3">Status</th>
-                      <th className="py-2.5 px-3">TLS Protocol</th>
-                      <th className="py-2.5 px-3">Public Key Algo</th>
-                      <th className="py-2.5 px-3">Executed At</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-700">
-                    {recentScans.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="py-6 text-center text-slate-400">
-                          No scans logged yet. Initiate an authorized scan above.
-                        </td>
-                      </tr>
-                    ) : (
-                      recentScans.map((scan) => {
-                        const res = scan.results?.[0];
-                        return (
-                          <tr key={scan.id} className="hover:bg-slate-50">
-                            <td className="py-2.5 px-3 font-mono font-medium text-slate-900">
-                              {scan.targetHost}:{scan.port}
-                            </td>
-                            <td className="py-2.5 px-3">
-                              <span
-                                className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
-                                  scan.status === 'COMPLETED'
-                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                    : 'bg-red-50 text-red-700 border-red-200'
-                                }`}
-                              >
-                                {scan.status}
-                              </span>
-                            </td>
-                            <td className="py-2.5 px-3 font-mono">{res?.tlsVersionNegotiated || 'N/A'}</td>
-                            <td className="py-2.5 px-3 font-mono">
-                              {res?.certPubKeyAlgo ? `${res.certPubKeyAlgo} (${res.certKeySize}b)` : 'N/A'}
-                            </td>
-                            <td className="py-2.5 px-3 text-slate-500">
-                              {formatDate(scan.completedAt || scan.createdAt)}
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
+            {/* Recent Scans Table */}
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+              <h3 className="font-bold text-slate-900 text-sm mb-3">Previous Scans</h3>
+              <div className="divide-y divide-slate-100 text-xs">
+                {recentScans.length === 0 ? (
+                  <p className="text-slate-400 py-4 text-center">No previous scans found.</p>
+                ) : (
+                  recentScans.slice(0, 5).map((scan) => (
+                    <div key={scan.id} className="py-2.5 flex items-center justify-between">
+                      <div>
+                        <span className="font-bold text-slate-900 font-mono">{scan.targetHost}</span>
+                        <span className="text-slate-400 ml-2">
+                          {formatDate(scan.completedAt || scan.createdAt)}
+                        </span>
+                      </div>
+                      <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        {scan.status}
+                      </span>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
         )}
 
-        {/* TAB 2: BULK MULTI-FILE IMPORT */}
+        {/* TAB 2: BULK FILE IMPORT */}
         {activeTab === 'import' && (
           <div className="space-y-6">
-            <div className="bg-white p-6 rounded-lg border border-slate-200 shadow-sm">
-              <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-                <UploadCloud className="w-4 h-4 text-pqgreen-600" />
-                Bulk Asset Inventory Ingestion (CSV, XLSX, JSON)
-              </h2>
-              <p className="text-xs text-slate-500 mt-1">
-                Upload multiple asset spreadsheets or export records in a single batch. Files will be
-                parsed, field-mapped, and checked for duplicates before you confirm database insertion.
-              </p>
+            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">Import Systems Inventory</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Upload your spreadsheet or CSV file. We will preview the systems before saving.
+                  </p>
+                </div>
 
-              {/* Multi-File Upload Zone */}
-              <div className="mt-5 border-2 border-dashed border-slate-200 rounded-lg p-6 text-center hover:border-navy-900/40 transition bg-slate-50/50">
+                <button
+                  onClick={downloadSampleCsv}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition self-start sm:self-auto"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Download Sample CSV Template
+                </button>
+              </div>
+
+              {/* Upload Dropzone */}
+              <div className="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center bg-slate-50 hover:bg-slate-100/80 transition cursor-pointer">
                 <input
                   type="file"
-                  id="multi-file-input"
+                  id="simple-file-input"
                   multiple
                   accept=".csv,.xlsx,.xls,.json"
                   onChange={handleFileChange}
                   className="hidden"
                 />
-                <label htmlFor="multi-file-input" className="cursor-pointer block">
-                  <UploadCloud className="w-8 h-8 mx-auto text-slate-400 mb-2" />
-                  <span className="text-xs font-semibold text-navy-900">
-                    Click to select files or drag and drop
+                <label htmlFor="simple-file-input" className="cursor-pointer block">
+                  <UploadCloud className="w-10 h-10 mx-auto text-slate-400 mb-2" />
+                  <span className="text-sm font-bold text-slate-900 block">
+                    Choose a file or drag and drop here
                   </span>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Supports .CSV, .XLSX, and .JSON files (up to 20MB per file)
-                  </p>
+                  <span className="text-xs text-slate-500 mt-1 block">
+                    Supports .CSV, Excel (.xlsx), and .JSON files
+                  </span>
                 </label>
               </div>
 
-              {/* Selected Files Queue */}
+              {/* Selected Files */}
               {selectedFiles.length > 0 && (
-                <div className="mt-4 space-y-2">
-                  <h4 className="text-xs font-semibold text-slate-700">
-                    Selected Files ({selectedFiles.length})
-                  </h4>
-                  <div className="divide-y divide-slate-100 border border-slate-200 rounded-md overflow-hidden bg-white">
-                    {selectedFiles.map((file, idx) => (
-                      <div
-                        key={idx}
-                        className="p-3 flex items-center justify-between text-xs hover:bg-slate-50"
-                      >
-                        <div className="flex items-center gap-2.5">
-                          {file.name.endsWith('.csv') ? (
-                            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                          ) : file.name.endsWith('.json') ? (
-                            <FileCode className="w-4 h-4 text-amber-600" />
-                          ) : (
-                            <FileText className="w-4 h-4 text-blue-600" />
-                          )}
-                          <span className="font-medium text-slate-800">{file.name}</span>
-                          <span className="text-[11px] text-slate-400">
-                            ({Math.round(file.size / 1024)} KB)
-                          </span>
-                        </div>
-                        <button
-                          onClick={() => removeFile(idx)}
-                          className="text-slate-400 hover:text-red-600"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="flex justify-end pt-2">
-                    <button
-                      onClick={handleGeneratePreview}
-                      disabled={previewLoading}
-                      className="px-4 py-2 bg-navy-900 hover:bg-navy-850 text-white text-xs font-medium rounded shadow-sm flex items-center gap-2 disabled:opacity-50"
+                <div className="space-y-3 pt-2">
+                  <span className="text-xs font-bold text-slate-700 block">
+                    Ready to parse ({selectedFiles.length} file):
+                  </span>
+                  {selectedFiles.map((f, i) => (
+                    <div
+                      key={i}
+                      className="p-3 bg-slate-50 rounded-lg border border-slate-200 flex items-center justify-between text-xs"
                     >
-                      {previewLoading ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin text-pqgreen-400" />
-                          Parsing and Validating...
-                        </>
-                      ) : (
-                        'Generate Import Preview'
-                      )}
-                    </button>
-                  </div>
+                      <span className="font-medium text-slate-800">{f.name}</span>
+                      <button
+                        onClick={() => removeFile(i)}
+                        className="text-red-500 hover:text-red-700"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+
+                  <button
+                    onClick={handleGeneratePreview}
+                    disabled={previewLoading}
+                    className="px-5 py-2.5 bg-navy-900 hover:bg-navy-850 text-white font-bold text-xs rounded-lg shadow-sm flex items-center gap-2 disabled:opacity-50 transition"
+                  >
+                    {previewLoading ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" />
+                        Analyzing File...
+                      </>
+                    ) : (
+                      'Preview Systems'
+                    )}
+                  </button>
                 </div>
               )}
 
               {importError && (
-                <div className="mt-4 p-3.5 rounded bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 shrink-0" />
-                  <span>{importError}</span>
+                <div className="p-3.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs">
+                  {importError}
                 </div>
               )}
 
               {importSummary && (
-                <div className="mt-4 p-4 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs space-y-1">
-                  <p className="font-bold flex items-center gap-1.5 text-sm">
+                <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs space-y-1">
+                  <p className="font-bold text-sm flex items-center gap-1.5">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    Import Successfully Executed
+                    Import Complete!
                   </p>
-                  <p>
-                    {importSummary.imported} assets imported into institutional inventory.
-                    {importSummary.duplicates > 0 && ` (${importSummary.duplicates} duplicate(s) handled).`}
-                  </p>
+                  <p>{importSummary.imported} systems successfully added to your inventory.</p>
                   <Link
                     href="/assets"
-                    className="inline-block mt-2 font-semibold text-emerald-900 underline"
+                    className="inline-block mt-2 font-bold text-emerald-900 underline"
                   >
-                    View in Asset Inventory &rarr;
+                    View Assets &rarr;
                   </Link>
                 </div>
               )}
             </div>
 
-            {/* PREVIEW TABLE AND USER CONFIRMATION */}
+            {/* Preview Section */}
             {previewData && (
-              <div className="bg-white p-6 rounded-lg border border-slate-200 shadow-sm space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200">
+              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-900">
-                      Import Preview & Validation Check
+                    <h3 className="font-bold text-slate-900 text-sm">
+                      Preview: {previewData.validRecords} systems ready to import
                     </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Review parsed records below. Verify column mappings before committing changes to the database.
+                    <p className="text-xs text-slate-500">
+                      Check the list below. Click "Confirm & Import" to save them.
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-3">
-                    <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={skipDuplicates}
-                        onChange={(e) => setSkipDuplicates(e.target.checked)}
-                        className="rounded text-navy-900 focus:ring-navy-900 border-slate-300"
-                      />
-                      <span>Skip existing duplicates</span>
-                    </label>
-
-                    <button
-                      onClick={handleExecuteImport}
-                      disabled={importing || previewData.validRecords === 0}
-                      className="px-4 py-2 bg-pqgreen-600 hover:bg-pqgreen-700 text-white text-xs font-semibold rounded shadow-sm flex items-center gap-1.5 disabled:opacity-50"
-                    >
-                      {importing ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          Inserting...
-                        </>
-                      ) : (
-                        `Confirm & Import (${previewData.validRecords} Records)`
-                      )}
-                    </button>
-                  </div>
+                  <button
+                    onClick={handleExecuteImport}
+                    disabled={importing || previewData.validRecords === 0}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-sm disabled:opacity-50 transition"
+                  >
+                    {importing ? 'Saving to Database...' : `Confirm & Save (${previewData.validRecords})`}
+                  </button>
                 </div>
 
-                {/* Validation summary badges */}
-                <div className="flex flex-wrap gap-2 text-xs">
-                  <span className="px-2.5 py-1 bg-slate-100 rounded text-slate-700 font-medium">
-                    Total Parsed: {previewData.totalRecords}
-                  </span>
-                  <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded font-medium">
-                    Valid for Import: {previewData.validRecords}
-                  </span>
-                  {previewData.duplicateRecords > 0 && (
-                    <span className="px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded font-medium">
-                      Duplicates Detected: {previewData.duplicateRecords}
-                    </span>
-                  )}
-                  {previewData.invalidRecords > 0 && (
-                    <span className="px-2.5 py-1 bg-red-50 text-red-700 border border-red-200 rounded font-medium">
-                      Validation Errors: {previewData.invalidRecords}
-                    </span>
-                  )}
-                </div>
-
-                {/* Preview Table */}
-                <div className="overflow-x-auto max-h-96 border border-slate-200 rounded-md">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead className="bg-slate-50 sticky top-0 border-b border-slate-200 text-slate-600 font-semibold">
+                <div className="overflow-x-auto max-h-80 border border-slate-200 rounded-lg">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200 sticky top-0">
                       <tr>
-                        <th className="py-2.5 px-3">Status</th>
-                        <th className="py-2.5 px-3">Asset Name</th>
-                        <th className="py-2.5 px-3">Hostname / Identifier</th>
-                        <th className="py-2.5 px-3">Type</th>
-                        <th className="py-2.5 px-3">Sensitivity</th>
-                        <th className="py-2.5 px-3">Reported Algorithms</th>
-                        <th className="py-2.5 px-3">Source File</th>
+                        <th className="p-2.5">Status</th>
+                        <th className="p-2.5">Name</th>
+                        <th className="p-2.5">Hostname</th>
+                        <th className="p-2.5">Type</th>
+                        <th className="p-2.5">Sensitivity</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 text-slate-700">
+                    <tbody className="divide-y divide-slate-100">
                       {previewData.items.map((item: any, idx: number) => (
-                        <tr
-                          key={idx}
-                          className={
-                            item.isDuplicate
-                              ? 'bg-amber-50/40'
-                              : !item.isValid
-                              ? 'bg-red-50/40'
-                              : 'hover:bg-slate-50'
-                          }
-                        >
-                          <td className="py-2.5 px-3">
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="p-2.5">
                             {item.isDuplicate ? (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800">
+                              <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-semibold">
                                 Duplicate
                               </span>
                             ) : item.isValid ? (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800">
+                              <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-semibold">
                                 Ready
                               </span>
                             ) : (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-800">
-                                Invalid
+                              <span className="text-[10px] bg-red-100 text-red-800 px-1.5 py-0.5 rounded font-semibold">
+                                Error
                               </span>
                             )}
                           </td>
-                          <td className="py-2.5 px-3 font-medium text-slate-900">{item.name}</td>
-                          <td className="py-2.5 px-3 font-mono">{item.identifier}</td>
-                          <td className="py-2.5 px-3">{item.assetType}</td>
-                          <td className="py-2.5 px-3">{item.dataSensitivity}</td>
-                          <td className="py-2.5 px-3 font-mono text-[11px] max-w-xs truncate">
-                            {item.knownAlgorithms || 'N/A'}
-                          </td>
-                          <td className="py-2.5 px-3 text-slate-400 text-[11px]">
-                            {item.sourceFile} (Row {item.rowNumber})
-                          </td>
+                          <td className="p-2.5 font-medium text-slate-900">{item.name}</td>
+                          <td className="p-2.5 font-mono text-slate-600">{item.identifier}</td>
+                          <td className="p-2.5">{item.assetType}</td>
+                          <td className="p-2.5">{item.dataSensitivity}</td>
                         </tr>
                       ))}
                     </tbody>

@@ -6,18 +6,18 @@ import { Header } from '@/components/Header';
 import {
   Server,
   ShieldAlert,
-  AlertTriangle,
-  Clock,
-  ArrowRight,
+  ShieldCheck,
   Radio,
   FileCheck2,
-  CheckCircle2,
-  ExternalLink,
-  ChevronRight,
-  ShieldCheck,
+  FileText,
+  UploadCloud,
+  ArrowRight,
   RefreshCw,
+  CheckCircle2,
+  AlertCircle,
+  HelpCircle,
 } from 'lucide-react';
-import { formatDate, getRiskBadgeClasses } from '@/lib/utils';
+import { formatDate } from '@/lib/utils';
 import { DashboardStats, fetchApi } from '@/lib/api';
 
 export default function DashboardPage() {
@@ -29,15 +29,13 @@ export default function DashboardPage() {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetchApi<{ success: boolean; data: DashboardStats }>(
-        '/dashboard/stats'
-      );
+      const res = await fetchApi<{ success: boolean; data: DashboardStats }>('/dashboard/stats');
       if (res.success && res.data) {
         setStats(res.data);
       }
     } catch (err: any) {
       console.error('Error fetching dashboard stats:', err);
-      setError(err.message || 'Failed to connect to backend assessment service');
+      setError(err.message || 'Cannot connect to backend assessment server');
     } finally {
       setLoading(false);
     }
@@ -48,409 +46,339 @@ export default function DashboardPage() {
   }, []);
 
   const totalRiskCount =
-    stats &&
-    (stats.riskDistribution.critical +
-      stats.riskDistribution.high +
-      stats.riskDistribution.medium +
-      stats.riskDistribution.low);
+    (stats?.riskDistribution.critical || 0) +
+    (stats?.riskDistribution.high || 0) +
+    (stats?.riskDistribution.medium || 0) +
+    (stats?.riskDistribution.low || 0);
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-slate-50">
       <Header
-        title="Institutional Cryptographic Posture"
-        subtitle="Post-quantum security assessment, quantum-vulnerable algorithm inventory, and NIST migration roadmap."
+        title="Post-Quantum Security Dashboard"
+        subtitle="A simple overview of your institution's preparation for post-quantum cryptography."
         actions={
           <div className="flex items-center gap-2">
             <button
               onClick={loadStats}
-              className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-50 flex items-center gap-1.5"
+              className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-md hover:bg-slate-50 flex items-center gap-1.5 transition"
+              title="Refresh Dashboard"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 text-slate-500 ${loading ? 'animate-spin' : ''}`} />
               Refresh
             </button>
             <Link
               href="/scan-import"
-              className="px-3.5 py-1.5 text-xs font-medium text-white bg-navy-900 hover:bg-navy-850 rounded-md flex items-center gap-1.5 shadow-sm transition"
+              className="px-3.5 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-md flex items-center gap-1.5 shadow-sm transition"
             >
-              <Radio className="w-3.5 h-3.5 text-pqgreen-400" />
-              New TLS Scan
+              <Radio className="w-3.5 h-3.5" />
+              Scan a Website
             </Link>
           </div>
         }
       />
 
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <div className="p-6 max-w-6xl mx-auto space-y-6">
         {error && (
-          <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 flex items-start justify-between">
-            <div>
-              <p className="font-semibold text-sm">Backend Service Notice</p>
-              <p className="text-xs text-amber-800 mt-0.5">{error}</p>
+          <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>{error}</span>
             </div>
             <button
               onClick={loadStats}
-              className="px-3 py-1 text-xs font-medium bg-amber-100 hover:bg-amber-200 text-amber-900 rounded border border-amber-300"
+              className="px-2.5 py-1 font-medium bg-amber-100 hover:bg-amber-200 rounded border border-amber-300 text-amber-900"
             >
-              Retry Connection
+              Retry
             </button>
           </div>
         )}
 
-        {/* Top 4 Key Metrics */}
+        {/* 1. Clear Quick Action Bar */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-bold text-slate-900">What would you like to do?</h2>
+            <p className="text-xs text-slate-500">Pick a straightforward action to get started.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            <Link
+              href="/scan-import"
+              className="flex-1 sm:flex-none px-3.5 py-2 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg flex items-center justify-center gap-2 transition"
+            >
+              <Radio className="w-4 h-4 text-emerald-600" />
+              <span>Check a Website</span>
+            </Link>
+            <Link
+              href="/scan-import"
+              className="flex-1 sm:flex-none px-3.5 py-2 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg flex items-center justify-center gap-2 transition"
+            >
+              <UploadCloud className="w-4 h-4 text-blue-600" />
+              <span>Import Assets (CSV/Excel)</span>
+            </Link>
+            <Link
+              href="/reports"
+              className="flex-1 sm:flex-none px-3.5 py-2 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg flex items-center justify-center gap-2 transition"
+            >
+              <FileText className="w-4 h-4 text-purple-600" />
+              <span>Get PDF Report</span>
+            </Link>
+          </div>
+        </div>
+
+        {/* 2. Top 4 Clean Metric Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-                Total Assets
-              </span>
-              <div className="p-2 rounded-md bg-slate-100 text-slate-600">
-                <Server className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="mt-3 flex items-baseline gap-2">
-              <span className="text-2xl font-bold text-slate-900">
+          {/* Total Systems */}
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+            <span className="text-xs font-medium text-slate-500">Total Systems Registered</span>
+            <div className="mt-2 flex items-baseline justify-between">
+              <span className="text-3xl font-extrabold text-slate-900">
                 {stats?.totalAssets ?? 0}
               </span>
-              <span className="text-xs text-slate-500">registered systems</span>
+              <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                Servers & Sites
+              </span>
             </div>
+            <Link
+              href="/assets"
+              className="mt-3 text-xs text-emerald-700 hover:text-emerald-800 font-semibold flex items-center gap-1"
+            >
+              Manage Systems &rarr;
+            </Link>
           </div>
 
-          <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-                Assessed Assets
+          {/* Assessed */}
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+            <span className="text-xs font-medium text-slate-500">Assessment Coverage</span>
+            <div className="mt-2 flex items-baseline justify-between">
+              <span className="text-3xl font-extrabold text-slate-900">
+                {stats?.assessmentProgress ?? 0}%
               </span>
-              <div className="p-2 rounded-md bg-emerald-50 text-emerald-600">
-                <FileCheck2 className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="mt-3 flex items-baseline gap-2">
-              <span className="text-2xl font-bold text-slate-900">
-                {stats?.assessedAssets ?? 0}
-              </span>
-              <span className="text-xs text-emerald-700 font-medium">
-                ({stats?.assessmentProgress ?? 0}% completed)
+              <span className="text-xs text-emerald-700 font-semibold bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                {stats?.assessedAssets ?? 0} Evaluated
               </span>
             </div>
+            <Link
+              href="/assessments"
+              className="mt-3 text-xs text-emerald-700 hover:text-emerald-800 font-semibold flex items-center gap-1"
+            >
+              Run Assessments &rarr;
+            </Link>
           </div>
 
-          <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-                High Risk Assets
-              </span>
-              <div className="p-2 rounded-md bg-red-50 text-red-600">
-                <ShieldAlert className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="mt-3 flex items-baseline gap-2">
-              <span className="text-2xl font-bold text-red-600">
+          {/* Quantum-Vulnerable */}
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+            <span className="text-xs font-medium text-slate-500">Vulnerable to Quantum Computers</span>
+            <div className="mt-2 flex items-baseline justify-between">
+              <span className="text-3xl font-extrabold text-red-600">
                 {stats?.highRiskAssets ?? 0}
               </span>
-              <span className="text-xs text-slate-500">quantum vulnerable</span>
+              <span className="text-xs text-red-700 font-semibold bg-red-50 border border-red-200 px-2 py-0.5 rounded">
+                Action Needed
+              </span>
             </div>
+            <Link
+              href="/findings"
+              className="mt-3 text-xs text-red-600 hover:text-red-700 font-semibold flex items-center gap-1"
+            >
+              Review Vulnerabilities &rarr;
+            </Link>
           </div>
 
-          <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-                Pending Assessments
+          {/* Ready / Safe */}
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+            <span className="text-xs font-medium text-slate-500">Quantum-Safe or Low Risk</span>
+            <div className="mt-2 flex items-baseline justify-between">
+              <span className="text-3xl font-extrabold text-emerald-600">
+                {stats?.riskDistribution.low ?? 0}
               </span>
-              <div className="p-2 rounded-md bg-amber-50 text-amber-600">
-                <Clock className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="mt-3 flex items-baseline gap-2">
-              <span className="text-2xl font-bold text-slate-900">
-                {stats?.pendingAssessments ?? 0}
+              <span className="text-xs text-emerald-700 font-semibold bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                Strong Security
               </span>
-              <span className="text-xs text-slate-500">awaiting evaluation</span>
             </div>
+            <Link
+              href="/recommendations"
+              className="mt-3 text-xs text-emerald-700 hover:text-emerald-800 font-semibold flex items-center gap-1"
+            >
+              View Guidance &rarr;
+            </Link>
           </div>
         </div>
 
-        {/* Middle Section: Assessment Progress & Risk Distribution */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Assessment Progress */}
-          <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
-            <h2 className="text-sm font-semibold text-slate-900">
-              Institutional Assessment Progress
-            </h2>
-            <p className="text-xs text-slate-500 mt-1">
-              Percentage of digital assets evaluated against NIST FIPS 203/204/205 standards.
-            </p>
-
-            <div className="mt-6 space-y-4">
-              <div>
-                <div className="flex justify-between text-xs font-medium text-slate-700 mb-1.5">
-                  <span>Coverage Rate</span>
-                  <span>{stats?.assessmentProgress ?? 0}%</span>
-                </div>
-                <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-navy-900 transition-all duration-500 rounded-full"
-                    style={{ width: `${stats?.assessmentProgress ?? 0}%` }}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 pt-4 border-t border-slate-100 text-xs">
-                <div>
-                  <span className="text-slate-400 block">Evaluated:</span>
-                  <span className="font-semibold text-slate-800">
-                    {stats?.assessedAssets ?? 0} of {stats?.totalAssets ?? 0}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-slate-400 block">Evaluation Target:</span>
-                  <span className="font-semibold text-slate-800">100% Core Systems</span>
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <Link
-                  href="/assessments"
-                  className="text-xs font-medium text-navy-800 hover:text-navy-900 flex items-center gap-1"
-                >
-                  Run Assessment Engine <ArrowRight className="w-3.5 h-3.5" />
-                </Link>
-              </div>
+        {/* 3. Simple Visual Status Bar */}
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs">
+            <div>
+              <h3 className="font-bold text-slate-900 text-sm">Overall Quantum Risk Breakdown</h3>
+              <p className="text-slate-500">Based on official NIST Post-Quantum Standards.</p>
             </div>
+            <span className="text-slate-500 font-medium">
+              {totalRiskCount} total cryptographic elements checked
+            </span>
           </div>
 
-          {/* Simple Risk Distribution */}
-          <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm lg:col-span-2">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-900">
-                  Risk Level Distribution (Active Findings)
-                </h2>
-                <p className="text-xs text-slate-500 mt-1">
-                  Categorized by cryptographic impact under Shor\'s and Grover\'s algorithms.
-                </p>
-              </div>
-              <Link
-                href="/findings"
-                className="text-xs font-medium text-slate-600 hover:text-navy-900 flex items-center gap-1"
-              >
-                View Findings <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
-            </div>
-
-            <div className="mt-6 space-y-3">
-              {/* Critical */}
-              <div>
-                <div className="flex justify-between text-xs font-medium text-slate-700 mb-1">
-                  <span className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-sm bg-red-600 inline-block" />
-                    Critical Risk (Immediate Shor / Broken Legacy)
-                  </span>
-                  <span className="font-semibold text-slate-900">
-                    {stats?.riskDistribution.critical ?? 0}
-                  </span>
-                </div>
-                <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-red-600 rounded-full"
-                    style={{
-                      width: totalRiskCount
-                        ? `${((stats?.riskDistribution.critical || 0) / totalRiskCount) * 100}%`
-                        : '0%',
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* High */}
-              <div>
-                <div className="flex justify-between text-xs font-medium text-slate-700 mb-1">
-                  <span className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-sm bg-orange-500 inline-block" />
-                    High Risk (RSA / ECDSA / ECDHE / SNDL Exposure)
-                  </span>
-                  <span className="font-semibold text-slate-900">
-                    {stats?.riskDistribution.high ?? 0}
-                  </span>
-                </div>
-                <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-orange-500 rounded-full"
-                    style={{
-                      width: totalRiskCount
-                        ? `${((stats?.riskDistribution.high || 0) / totalRiskCount) * 100}%`
-                        : '0%',
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Medium */}
-              <div>
-                <div className="flex justify-between text-xs font-medium text-slate-700 mb-1">
-                  <span className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-sm bg-amber-500 inline-block" />
-                    Medium Risk (AES-128 / Classical Transition)
-                  </span>
-                  <span className="font-semibold text-slate-900">
-                    {stats?.riskDistribution.medium ?? 0}
-                  </span>
-                </div>
-                <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-amber-500 rounded-full"
-                    style={{
-                      width: totalRiskCount
-                        ? `${((stats?.riskDistribution.medium || 0) / totalRiskCount) * 100}%`
-                        : '0%',
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Low */}
-              <div>
-                <div className="flex justify-between text-xs font-medium text-slate-700 mb-1">
-                  <span className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" />
-                    Low / Quantum-Resistant (AES-256 / SHA-384 / Hybrid)
-                  </span>
-                  <span className="font-semibold text-slate-900">
-                    {stats?.riskDistribution.low ?? 0}
-                  </span>
-                </div>
-                <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-emerald-500 rounded-full"
-                    style={{
-                      width: totalRiskCount
-                        ? `${((stats?.riskDistribution.low || 0) / totalRiskCount) * 100}%`
-                        : '0%',
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {(!totalRiskCount || totalRiskCount === 0) && (
-              <div className="mt-4 p-3 rounded bg-slate-50 text-slate-500 text-xs text-center border border-slate-200">
-                No active findings recorded. Run an assessment on registered assets or perform a TLS scan.
-              </div>
+          {/* Segmented bar */}
+          <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden flex">
+            {totalRiskCount > 0 ? (
+              <>
+                <div
+                  style={{
+                    width: `${((stats?.riskDistribution.critical || 0) / totalRiskCount) * 100}%`,
+                  }}
+                  className="bg-red-500 h-full"
+                  title={`Critical: ${stats?.riskDistribution.critical}`}
+                />
+                <div
+                  style={{
+                    width: `${((stats?.riskDistribution.high || 0) / totalRiskCount) * 100}%`,
+                  }}
+                  className="bg-orange-500 h-full"
+                  title={`High: ${stats?.riskDistribution.high}`}
+                />
+                <div
+                  style={{
+                    width: `${((stats?.riskDistribution.medium || 0) / totalRiskCount) * 100}%`,
+                  }}
+                  className="bg-amber-400 h-full"
+                  title={`Medium: ${stats?.riskDistribution.medium}`}
+                />
+                <div
+                  style={{
+                    width: `${((stats?.riskDistribution.low || 0) / totalRiskCount) * 100}%`,
+                  }}
+                  className="bg-emerald-500 h-full"
+                  title={`Low/Safe: ${stats?.riskDistribution.low}`}
+                />
+              </>
+            ) : (
+              <div className="w-full bg-slate-200 h-full" />
             )}
           </div>
+
+          {/* Legend */}
+          <div className="flex flex-wrap items-center gap-4 text-xs pt-1">
+            <span className="flex items-center gap-1.5 text-slate-700">
+              <span className="w-3 h-3 rounded-full bg-red-500 inline-block" />
+              <strong>{stats?.riskDistribution.critical || 0}</strong> Critical (Legacy Broken)
+            </span>
+            <span className="flex items-center gap-1.5 text-slate-700">
+              <span className="w-3 h-3 rounded-full bg-orange-500 inline-block" />
+              <strong>{stats?.riskDistribution.high || 0}</strong> High (RSA / ECDSA / ECDHE)
+            </span>
+            <span className="flex items-center gap-1.5 text-slate-700">
+              <span className="w-3 h-3 rounded-full bg-amber-400 inline-block" />
+              <strong>{stats?.riskDistribution.medium || 0}</strong> Medium (AES-128 Transition)
+            </span>
+            <span className="flex items-center gap-1.5 text-slate-700">
+              <span className="w-3 h-3 rounded-full bg-emerald-500 inline-block" />
+              <strong>{stats?.riskDistribution.low || 0}</strong> Quantum-Safe (AES-256 / Post-Quantum)
+            </span>
+          </div>
         </div>
 
-        {/* Bottom Section: Recent Scans & Top Recommendations */}
+        {/* 4. Two Simple Side-by-Side Cards: Recent Scans & Recommended Actions */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Recent Scans */}
-          <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-                <Radio className="w-4 h-4 text-slate-500" />
-                Recent TLS Inspections
-              </h2>
-              <Link
-                href="/scan-import"
-                className="text-xs font-medium text-navy-800 hover:text-navy-900 flex items-center gap-1"
-              >
-                Scan Manager <ChevronRight className="w-3.5 h-3.5" />
-              </Link>
-            </div>
+          {/* Left: Recent Scans */}
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                  <Radio className="w-4 h-4 text-emerald-600" />
+                  Recent Scans
+                </h3>
+                <Link
+                  href="/scan-import"
+                  className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold"
+                >
+                  New Scan &rarr;
+                </Link>
+              </div>
 
-            <div className="mt-3 divide-y divide-slate-100">
-              {stats?.recentScans && stats.recentScans.length > 0 ? (
-                stats.recentScans.map((scan) => (
-                  <div key={scan.id} className="py-3 flex items-center justify-between text-xs">
-                    <div>
-                      <p className="font-semibold text-slate-900 font-mono">
-                        {scan.targetHost}:{scan.port}
-                      </p>
-                      <div className="flex items-center gap-2 mt-0.5 text-slate-500">
-                        <span>{scan.tlsVersionNegotiated || 'Pending'}</span>
-                        <span>•</span>
-                        <span>
-                          {scan.certPubKeyAlgo ? `${scan.certPubKeyAlgo} (${scan.certKeySize}b)` : 'Cert info'}
-                        </span>
+              <div className="mt-3 divide-y divide-slate-100">
+                {stats?.recentScans && stats.recentScans.length > 0 ? (
+                  stats.recentScans.slice(0, 4).map((scan) => (
+                    <div key={scan.id} className="py-2.5 flex items-center justify-between text-xs">
+                      <div>
+                        <p className="font-semibold text-slate-900 font-mono">
+                          {scan.targetHost}
+                        </p>
+                        <p className="text-[11px] text-slate-500">
+                          {scan.tlsVersionNegotiated || 'TLS 1.2/1.3'} • {scan.certPubKeyAlgo || 'Certificate'}{' '}
+                          {scan.certKeySize ? `(${scan.certKeySize}b)` : ''}
+                        </p>
                       </div>
-                    </div>
-                    <div className="text-right">
-                      <span
-                        className={`inline-block px-2 py-0.5 text-[10px] font-semibold rounded border ${
-                          scan.status === 'COMPLETED'
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : 'bg-amber-50 text-amber-700 border-amber-200'
-                        }`}
-                      >
+                      <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
                         {scan.status}
                       </span>
-                      <p className="text-[11px] text-slate-400 mt-0.5">
-                        {formatDate(scan.completedAt || scan.createdAt)}
-                      </p>
                     </div>
+                  ))
+                ) : (
+                  <div className="py-8 text-center text-slate-400 text-xs">
+                    No scans performed yet. Enter a website hostname to test.
                   </div>
-                ))
-              ) : (
-                <div className="py-8 text-center text-slate-400">
-                  <Radio className="w-8 h-8 mx-auto text-slate-300 stroke-1" />
-                  <p className="text-xs mt-2">No authorized scans performed yet.</p>
-                  <Link
-                    href="/scan-import"
-                    className="inline-block mt-2 text-xs font-medium text-navy-800 hover:underline"
-                  >
-                    Launch your first scan &rarr;
-                  </Link>
-                </div>
-              )}
+                )}
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 mt-3 text-right">
+              <Link
+                href="/scan-import"
+                className="text-xs text-slate-600 hover:text-slate-900 font-medium"
+              >
+                Go to Scanner &rarr;
+              </Link>
             </div>
           </div>
 
-          {/* Urgent Recommendations */}
-          <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-500" />
-                Priority Migration Recommendations
-              </h2>
-              <Link
-                href="/recommendations"
-                className="text-xs font-medium text-navy-800 hover:text-navy-900 flex items-center gap-1"
-              >
-                All Actions <ChevronRight className="w-3.5 h-3.5" />
-              </Link>
+          {/* Right: What You Need To Do */}
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  Priority Next Steps
+                </h3>
+                <Link
+                  href="/recommendations"
+                  className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold"
+                >
+                  All Actions &rarr;
+                </Link>
+              </div>
+
+              <div className="mt-3 space-y-3">
+                {stats?.urgentRecommendations && stats.urgentRecommendations.length > 0 ? (
+                  stats.urgentRecommendations.slice(0, 3).map((rec) => (
+                    <div
+                      key={rec.id}
+                      className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs space-y-1"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-slate-900">{rec.finding.asset.name}</span>
+                        <span className="text-[10px] font-bold text-orange-700 bg-orange-100 px-1.5 py-0.5 rounded">
+                          Migrate
+                        </span>
+                      </div>
+                      <p className="text-slate-600 text-[11px]">
+                        Change: <span className="font-mono text-red-600">{rec.finding.algorithmOrConfig}</span>{' '}
+                        &rarr; <span className="font-mono text-emerald-700 font-semibold">{rec.recommendedAlgorithm}</span>
+                      </p>
+                      <p className="text-slate-500 text-[11px] line-clamp-1">{rec.rationale}</p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="py-8 text-center text-slate-400 text-xs">
+                    All evaluated systems are currently low risk.
+                  </div>
+                )}
+              </div>
             </div>
 
-            <div className="mt-3 divide-y divide-slate-100">
-              {stats?.urgentRecommendations && stats.urgentRecommendations.length > 0 ? (
-                stats.urgentRecommendations.map((rec) => (
-                  <div key={rec.id} className="py-3 text-xs space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-slate-900">
-                        {rec.finding.asset.name}
-                      </span>
-                      <span
-                        className={`px-2 py-0.5 text-[10px] font-semibold rounded border ${getRiskBadgeClasses(
-                          rec.finding.riskLevel
-                        )}`}
-                      >
-                        {rec.finding.riskLevel}
-                      </span>
-                    </div>
-                    <p className="text-slate-600 font-mono text-[11px]">
-                      Current: {rec.finding.algorithmOrConfig} &rarr; Target:{' '}
-                      <span className="font-semibold text-pqgreen-700">
-                        {rec.recommendedAlgorithm}
-                      </span>
-                    </p>
-                    <p className="text-slate-500 line-clamp-1">{rec.rationale}</p>
-                  </div>
-                ))
-              ) : (
-                <div className="py-8 text-center text-slate-400">
-                  <ShieldCheck className="w-8 h-8 mx-auto text-emerald-400 stroke-1" />
-                  <p className="text-xs mt-2">No urgent migration actions pending.</p>
-                  <p className="text-[11px] text-slate-400">
-                    Run an assessment across your assets to generate recommendations.
-                  </p>
-                </div>
-              )}
+            <div className="pt-3 border-t border-slate-100 mt-3 text-right">
+              <Link
+                href="/recommendations"
+                className="text-xs text-slate-600 hover:text-slate-900 font-medium"
+              >
+                View full step-by-step migration guide &rarr;
+              </Link>
             </div>
           </div>
         </div>
