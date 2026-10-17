@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import {
   Radio,
@@ -25,6 +26,7 @@ import { formatDate } from '@/lib/utils';
 import { fetchApi } from '@/lib/api';
 
 export default function ScanAndImportPage() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<'scan' | 'import'>('scan');
 
   // Scanner state
@@ -39,6 +41,8 @@ export default function ScanAndImportPage() {
   const [scanDetails, setScanDetails] = useState<any | null>(null);
   const [loadingScanId, setLoadingScanId] = useState<string | null>(null);
   const [scanDetailsError, setScanDetailsError] = useState<string | null>(null);
+  const [assessingAssetId, setAssessingAssetId] = useState<string | null>(null);
+  const [assessmentError, setAssessmentError] = useState<string | null>(null);
 
   // Import state
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -103,6 +107,27 @@ export default function ScanAndImportPage() {
       setScanDetailsError(err.message || 'Failed to load scan results');
     } finally {
       setLoadingScanId(null);
+    }
+  };
+
+  const handleRunRiskAssessment = async (assetId?: string) => {
+    if (!assetId) {
+      setAssessmentError('This scan is not linked to a saved asset, so it cannot be assessed.');
+      return;
+    }
+
+    setAssessingAssetId(assetId);
+    setAssessmentError(null);
+    try {
+      const res = await fetchApi<any>(`/assessments/run/${assetId}`, { method: 'POST' });
+      if (!res.success) {
+        throw new Error(res.message || 'Assessment could not be completed.');
+      }
+      router.push('/assessments');
+    } catch (err: any) {
+      setAssessmentError(err.message || 'Failed to run risk assessment.');
+    } finally {
+      setAssessingAssetId(null);
     }
   };
 
@@ -363,13 +388,20 @@ export default function ScanAndImportPage() {
                     </h3>
                   </div>
 
-                  <Link
-                    href="/assessments"
+                  <button
+                    onClick={() => handleRunRiskAssessment(scanResult.linkedAssetId)}
+                    disabled={assessingAssetId === scanResult.linkedAssetId}
                     className="px-4 py-2 bg-navy-900 hover:bg-navy-850 text-white text-xs font-bold rounded-lg flex items-center gap-1.5 shadow-sm transition"
                   >
-                    View Risk Assessment &rarr;
-                  </Link>
+                    {assessingAssetId === scanResult.linkedAssetId ? 'Generating Assessment...' : 'View Risk Assessment →'}
+                  </button>
                 </div>
+
+                {assessmentError && (
+                  <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                    {assessmentError}
+                  </p>
+                )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                   <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200">
@@ -699,6 +731,7 @@ export default function ScanAndImportPage() {
                 )}
 
                 {scanDetails.results?.[0] ? (
+                  <>
                   <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
                     {[
                       ['TLS version', scanDetails.results[0].tlsVersionNegotiated],
@@ -724,6 +757,19 @@ export default function ScanAndImportPage() {
                       </div>
                     ))}
                   </div>
+                  <div className="mt-4 flex flex-col items-start gap-2">
+                    <button
+                      onClick={() => handleRunRiskAssessment(scanDetails.asset?.id || scanDetails.assetId)}
+                      disabled={Boolean(assessingAssetId)}
+                      className="rounded-lg bg-navy-900 px-4 py-2 text-xs font-bold text-white transition hover:bg-navy-850 disabled:opacity-50"
+                    >
+                      {assessingAssetId ? 'Generating Assessment...' : 'Run Risk Assessment'}
+                    </button>
+                    {assessmentError && (
+                      <p className="text-xs text-red-700">{assessmentError}</p>
+                    )}
+                  </div>
+                  </>
                 ) : (
                   <p className="text-sm text-slate-600">No result details were saved for this scan.</p>
                 )}
