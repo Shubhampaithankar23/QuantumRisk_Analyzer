@@ -19,19 +19,36 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 4000;
-const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:3000';
+import { seedDatabase } from './lib/seed';
+
+const rawCors = process.env.CORS_ORIGIN || 'http://localhost:3000';
+const allowedOrigins = rawCors.split(',').map((o) => o.trim()).filter(Boolean);
 
 // Security Middlewares
 app.use(helmet());
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps, curl, server-to-server) or matching origin
-      if (!origin || origin === CORS_ORIGIN || origin.startsWith('http://localhost:')) {
-        callback(null, true);
-      } else {
-        callback(null, true); // Permissive in local development
+      // Allow requests with no origin (curl, server-to-server, health probes)
+      if (!origin) return callback(null, true);
+
+      // Allow localhost and local loopback
+      if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+        return callback(null, true);
       }
+
+      // Allow any Vercel deployment URL
+      if (origin.endsWith('.vercel.app') || origin === 'https://vercel.app') {
+        return callback(null, true);
+      }
+
+      // Allow explicitly specified origins from env
+      if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+        return callback(null, true);
+      }
+
+      // Default allow for seamless cloud deployment
+      return callback(null, true);
     },
     credentials: true,
   })
@@ -56,12 +73,19 @@ app.use('/api/v1/auth', authRoutes);
 app.use(errorHandler);
 
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
+  app.listen(PORT, async () => {
     console.log(`=======================================================`);
     console.log(`🚀 PQ Readiness Backend API listening on port ${PORT}`);
     console.log(`📡 Base API URL: http://localhost:${PORT}/api/v1`);
     console.log(`🛡️  Health check: http://localhost:${PORT}/api/v1/health`);
     console.log(`=======================================================`);
+
+    // Ensure baseline institutional datasets and admin accounts exist
+    try {
+      await seedDatabase();
+    } catch (seedErr) {
+      console.warn('[Startup] Database auto-seed note:', seedErr);
+    }
   });
 }
 

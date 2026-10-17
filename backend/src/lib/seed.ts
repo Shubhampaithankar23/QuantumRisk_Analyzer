@@ -20,7 +20,7 @@ export async function seedDatabase() {
     console.log(`[Seed] Created institution: ${institution.name}`);
   }
 
-  // Check admin user
+  // Check admin users
   let adminUser = await prisma.user.findUnique({
     where: { email: 'admin@apex.edu' },
   });
@@ -37,6 +37,24 @@ export async function seedDatabase() {
       },
     });
     console.log(`[Seed] Created default administrator: ${adminUser.email}`);
+  }
+
+  let internalAdmin = await prisma.user.findUnique({
+    where: { email: 'admin@quantumrisk.internal' },
+  });
+
+  if (!internalAdmin) {
+    const internalHash = await bcrypt.hash('Admin@PQ2026!', 10);
+    internalAdmin = await prisma.user.create({
+      data: {
+        email: 'admin@quantumrisk.internal',
+        name: 'QuantumRisk Platform Administrator',
+        passwordHash: internalHash,
+        role: 'ADMIN',
+        institutionId: institution.id,
+      },
+    });
+    console.log(`[Seed] Created internal administrator: ${internalAdmin.email}`);
   }
 
   // Check baseline assets

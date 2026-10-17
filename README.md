@@ -24,6 +24,7 @@
 - [Prerequisites](#prerequisites)
 - [Quick Start & Installation](#quick-start--installation)
 - [Running the Services](#running-the-services)
+- [Cloud Deployment (Vercel & Render)](#cloud-deployment-vercel--render)
 - [Default Administrative Credentials](#default-administrative-credentials)
 - [API Documentation](#api-documentation)
 - [Project Directory Structure](#project-directory-structure)
@@ -235,17 +236,44 @@ npm run dev:frontend
 
 ---
 
+## Cloud Deployment (Vercel & Render)
+
+For full step-by-step instructions with screenshots and troubleshooting, see the [Deployment Guide](docs/DEPLOYMENT.md).
+
+### 1. Deploy Backend to Render
+1. Go to [dashboard.render.com](https://dashboard.render.com) and click **New +** -> **Web Service**.
+2. Select your repository: `Shubhampaithankar23/QuantumRisk_Analyzer`.
+3. Set the following parameters:
+   - **Root Directory**: `backend`
+   - **Runtime**: `Node`
+   - **Build Command**: `npm install && npx prisma generate && npm run build && npx prisma db push`
+   - **Start Command**: `npm start`
+4. Set Environment Variables:
+   - `NODE_ENV`: `production`
+   - `PORT`: `10000`
+   - `DATABASE_URL`: `file:./dev.db`
+   - `JWT_SECRET`: *(A random 32+ char secret string)*
+   - `CORS_ORIGIN`: `https://*.vercel.app`
+5. Click **Deploy**. Your API will be live at `https://your-backend.onrender.com`.
+
+### 2. Deploy Frontend to Vercel
+1. Go to [vercel.com](https://vercel.com) and click **Add New...** -> **Project**.
+2. Import `Shubhampaithankar23/QuantumRisk_Analyzer`.
+3. Set **Root Directory** to `frontend`.
+4. Add the following Environment Variable:
+   - `NEXT_PUBLIC_API_URL`: `https://your-backend.onrender.com/api/v1` *(replace with your Render backend URL)*
+5. Click **Deploy**. Your frontend is live at `https://your-app.vercel.app`!
+
+---
+
 ## Default Administrative Credentials
 
-The database is pre-seeded with an institutional security administrator account for local evaluation:
+The database is pre-seeded with institutional security administrator accounts:
 
-| Field | Seed Value |
-| :--- | :--- |
-| **Login URL** | [http://localhost:3000/login](http://localhost:3000/login) |
-| **Institutional Email** | `admin@apex.edu` |
-| **Password** | `Admin@123456` |
-| **Role** | Institutional Security Officer (`ADMIN`) |
-| **Organization** | Apex University of Science & Technology |
+| Email | Password | Role | Description |
+| :--- | :--- | :--- | :--- |
+| `admin@quantumrisk.internal` | `Admin@PQ2026!` | `ADMIN` | QuantumRisk Platform Administrator |
+| `admin@apex.edu` | `Admin@123456` | `ADMIN` | Apex University CISO |
 
 *(Note: In accordance with security requirements, the login form fields are blank by default—credentials must be entered manually).*
 
