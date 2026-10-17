@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     rootDir: backend
-    buildCommand: npm install && npm run build && npx prisma db push
+    buildCommand: npm ci --include=dev && npm run build && npx prisma db push
     startCommand: npm start
     healthCheckPath: /api/v1/health
     envVars:

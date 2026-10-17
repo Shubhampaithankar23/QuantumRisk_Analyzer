@@ -56,7 +56,7 @@ You can deploy the backend to Render in two ways:
    - **Runtime**: `Node`
    - **Build Command**:
      ```bash
-     npm install && npx prisma generate && npm run build && npx prisma db push
+     npm ci --include=dev && npm run build && npx prisma db push
      ```
    - **Start Command**:
      ```bash

@@ -246,7 +246,7 @@ For full step-by-step instructions with screenshots and troubleshooting, see the
 3. Set the following parameters:
    - **Root Directory**: `backend`
    - **Runtime**: `Node`
-   - **Build Command**: `npm install && npx prisma generate && npm run build && npx prisma db push`
+   - **Build Command**: `npm ci --include=dev && npm run build && npx prisma db push`
    - **Start Command**: `npm start`
 4. Set Environment Variables:
    - `NODE_ENV`: `production`
