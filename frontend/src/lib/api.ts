@@ -1,13 +1,50 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
 
+export function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('pq_auth_token');
+}
+
+export function setAuthToken(token: string) {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem('pq_auth_token', token);
+}
+
+export function getCurrentUser(): any | null {
+  if (typeof window === 'undefined') return null;
+  const userJson = localStorage.getItem('pq_auth_user');
+  if (!userJson) return null;
+  try {
+    return JSON.parse(userJson);
+  } catch {
+    return null;
+  }
+}
+
+export function setCurrentUser(user: any) {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem('pq_auth_user', JSON.stringify(user));
+}
+
+export function logout() {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem('pq_auth_token');
+  localStorage.removeItem('pq_auth_user');
+}
+
 export async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
+  const token = getAuthToken();
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(options?.headers as Record<string, string>),
+  };
+
   const response = await fetch(url, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
+    headers,
     cache: 'no-store',
   });
 
