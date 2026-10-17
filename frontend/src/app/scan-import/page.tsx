@@ -18,6 +18,8 @@ import {
   Info,
   Trash2,
   Download,
+  Eye,
+  X,
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import { fetchApi } from '@/lib/api';
@@ -34,6 +36,9 @@ export default function ScanAndImportPage() {
   const [scanError, setScanError] = useState<string | null>(null);
   const [recentScans, setRecentScans] = useState<any[]>([]);
   const [deletingScanId, setDeletingScanId] = useState<string | null>(null);
+  const [scanDetails, setScanDetails] = useState<any | null>(null);
+  const [loadingScanId, setLoadingScanId] = useState<string | null>(null);
+  const [scanDetailsError, setScanDetailsError] = useState<string | null>(null);
 
   // Import state
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -62,6 +67,7 @@ export default function ScanAndImportPage() {
     try {
       const res = await fetchApi<any>(`/scans/${id}`, { method: 'DELETE' });
       if (res.success) {
+        if (scanDetails?.id === id) setScanDetails(null);
         await loadScanHistory();
       }
     } catch (err: any) {
@@ -76,10 +82,27 @@ export default function ScanAndImportPage() {
     try {
       const res = await fetchApi<any>('/scans', { method: 'DELETE' });
       if (res.success) {
+        setScanDetails(null);
         await loadScanHistory();
       }
     } catch (err: any) {
       alert(`Failed to clear scans: ${err.message || 'Error occurred'}`);
+    }
+  };
+
+  const handleViewScan = async (id: string) => {
+    setLoadingScanId(id);
+    setScanDetailsError(null);
+    setScanDetails(null);
+    try {
+      const res = await fetchApi<any>(`/scans/${id}`);
+      if (res.success) {
+        setScanDetails(res.data);
+      }
+    } catch (err: any) {
+      setScanDetailsError(err.message || 'Failed to load scan results');
+    } finally {
+      setLoadingScanId(null);
     }
   };
 
@@ -420,6 +443,19 @@ export default function ScanAndImportPage() {
                           {scan.status}
                         </span>
                         <button
+                          onClick={() => handleViewScan(scan.id)}
+                          disabled={loadingScanId === scan.id}
+                          className="px-2 py-1 rounded text-xs text-slate-500 hover:text-navy-900 hover:bg-slate-100 border border-transparent transition flex items-center gap-1 disabled:opacity-50"
+                          title="View saved scan results"
+                        >
+                          {loadingScanId === scan.id ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Eye className="w-3.5 h-3.5" />
+                          )}
+                          <span className="text-[11px] font-medium">View results</span>
+                        </button>
+                        <button
                           onClick={() => handleDeleteScan(scan.id, scan.targetHost)}
                           disabled={deletingScanId === scan.id}
                           className="px-2 py-1 rounded text-xs text-slate-400 hover:text-red-600 hover:bg-red-50 border border-transparent hover:border-red-200 transition flex items-center gap-1"
@@ -605,6 +641,97 @@ export default function ScanAndImportPage() {
           </div>
         )}
       </div>
+
+      {(scanDetails || scanDetailsError) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="scan-details-title"
+            className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-xl"
+          >
+            <div className="mb-5 flex items-start justify-between border-b border-slate-100 pb-4">
+              <div>
+                <h2 id="scan-details-title" className="text-base font-bold text-slate-900">
+                  Saved TLS Scan Results
+                </h2>
+                {scanDetails && (
+                  <p className="mt-1 font-mono text-xs text-slate-500">
+                    {scanDetails.targetHost}:{scanDetails.port}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => {
+                  setScanDetails(null);
+                  setScanDetailsError(null);
+                }}
+                className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Close scan results"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {scanDetailsError ? (
+              <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                {scanDetailsError}
+              </p>
+            ) : scanDetails ? (
+              <>
+                <div className="mb-4 flex items-center gap-2 text-xs">
+                  <span className={`rounded border px-2 py-1 font-semibold ${
+                    scanDetails.status === 'COMPLETED'
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border-red-200 bg-red-50 text-red-700'
+                  }`}>
+                    {scanDetails.status}
+                  </span>
+                  {scanDetails.completedAt && (
+                    <span className="text-slate-500">{formatDate(scanDetails.completedAt)}</span>
+                  )}
+                </div>
+
+                {scanDetails.errorMessage && (
+                  <p className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                    {scanDetails.errorMessage}
+                  </p>
+                )}
+
+                {scanDetails.results?.[0] ? (
+                  <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
+                    {[
+                      ['TLS version', scanDetails.results[0].tlsVersionNegotiated],
+                      ['Supported TLS versions', (() => {
+                        try {
+                          return JSON.parse(scanDetails.results[0].supportedTlsVersions || '[]').join(', ');
+                        } catch {
+                          return scanDetails.results[0].supportedTlsVersions;
+                        }
+                      })()],
+                      ['Cipher suite', scanDetails.results[0].cipherSuiteNegotiated],
+                      ['Certificate algorithm', scanDetails.results[0].certPubKeyAlgo],
+                      ['Certificate key size', scanDetails.results[0].certKeySize ? `${scanDetails.results[0].certKeySize} bits` : null],
+                      ['Key exchange', scanDetails.results[0].keyExchangeGroup],
+                      ['Certificate subject', scanDetails.results[0].certSubject],
+                      ['Certificate issuer', scanDetails.results[0].certIssuer],
+                      ['Certificate signature', scanDetails.results[0].certSignatureAlgo],
+                      ['Scanner', scanDetails.results[0].scannerVersion],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <span className="mb-1 block text-[11px] text-slate-500">{label}</span>
+                        <span className="break-words font-semibold text-slate-900">{value || 'Not available'}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-600">No result details were saved for this scan.</p>
+                )}
+              </>
+            ) : null}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
