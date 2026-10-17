@@ -166,13 +166,70 @@ async function testTlsConnection(
   });
 }
 
+const PYTHON_SCANNER_URL = process.env.PYTHON_SCANNER_URL || 'http://127.0.0.1:5000';
+
+async function scanWithPythonService(targetHost: string, port: number): Promise<ScanOutput | null> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+
+    const response = await fetch(`${PYTHON_SCANNER_URL}/scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_host: targetHost, port }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || `Python scanner responded with status ${response.status}`);
+    }
+
+    const data: any = await response.json();
+    return {
+      targetHost: data.target_host,
+      resolvedIp: data.resolved_ip,
+      port: data.port,
+      tlsVersionNegotiated: data.tls_version_negotiated,
+      supportedTlsVersions: data.supported_tls_versions && data.supported_tls_versions.length > 0
+        ? data.supported_tls_versions
+        : [data.tls_version_negotiated || 'TLSv1.3'],
+      cipherSuiteNegotiated: data.cipher_suite_negotiated,
+      certSubject: data.cert_subject,
+      certIssuer: data.cert_issuer,
+      certValidFrom: data.cert_valid_from ? new Date(data.cert_valid_from) : undefined,
+      certValidTo: data.cert_valid_to ? new Date(data.cert_valid_to) : undefined,
+      certPubKeyAlgo: data.cert_pub_key_algo || 'Unknown',
+      certKeySize: data.cert_key_size,
+      certSignatureAlgo: data.cert_signature_algo,
+      certSerial: data.cert_serial,
+      keyExchangeGroup: data.key_exchange_group || 'Unknown Key Exchange',
+      isPqHybrid: Boolean(data.is_pq_hybrid),
+      ocspStapled: Boolean(data.ocsp_stapled),
+      scannerVersion: data.scanner_engine || 'SSLyze-v6 / Python-Cryptography',
+      scannedAt: data.scanned_at || new Date().toISOString(),
+      rawDetails: data.raw_details || {},
+    };
+  } catch (err: any) {
+    console.warn(`[Scanner] Python SSLyze service unavailable (${err.message}). Using native OpenSSL engine.`);
+    return null;
+  }
+}
+
 export async function executeTlsScan(
   targetHost: string,
   port: number = 443
 ): Promise<ScanOutput> {
   const resolvedIp = await validateScanTarget(targetHost, port);
 
-  // Probe TLS versions: 1.0, 1.1, 1.2, 1.3
+  // 1. Prioritize Python FastAPI SSLyze & Cryptography scanning service
+  const pythonScanResult = await scanWithPythonService(targetHost, port);
+  if (pythonScanResult) {
+    return pythonScanResult;
+  }
+
+  // 2. Fallback to native OpenSSL TLS probe if Python microservice is offline
   const versions: Array<'TLSv1' | 'TLSv1.1' | 'TLSv1.2' | 'TLSv1.3'> = [
     'TLSv1',
     'TLSv1.1',
