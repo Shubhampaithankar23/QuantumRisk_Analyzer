@@ -13,15 +13,14 @@ import {
   RefreshCw,
   AlertCircle,
   CheckCircle2,
-  Sparkles,
 } from 'lucide-react';
 import { fetchApi, setAuthToken, setCurrentUser } from '@/lib/api';
 
 export default function LoginPage() {
   const router = useRouter();
 
-  const [email, setEmail] = useState('admin@apex.edu');
-  const [password, setPassword] = useState('Admin@123456');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,12 +53,6 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleFillDemo = () => {
-    setEmail('admin@apex.edu');
-    setPassword('Admin@123456');
-    setError(null);
   };
 
   return (
@@ -118,16 +111,7 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="font-semibold text-slate-700">Password</label>
-              <button
-                type="button"
-                onClick={handleFillDemo}
-                className="text-[11px] text-emerald-600 hover:text-emerald-700 font-semibold"
-              >
-                Use Demo Login
-              </button>
-            </div>
+            <label className="block font-semibold text-slate-700 mb-1">Password</label>
             <div className="relative">
               <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
@@ -179,20 +163,6 @@ export default function LoginPage() {
             )}
           </button>
         </form>
-
-        {/* 1-Click Demo Shortcut Pill */}
-        <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-600 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            <span>Default CISO Admin:</span>
-          </div>
-          <button
-            onClick={handleFillDemo}
-            className="text-emerald-700 font-semibold hover:underline"
-          >
-            admin@apex.edu / Admin@123456
-          </button>
-        </div>
 
         {/* Return to Dashboard link */}
         <div className="text-center pt-2">

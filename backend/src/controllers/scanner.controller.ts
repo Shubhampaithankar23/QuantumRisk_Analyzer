@@ -221,3 +221,46 @@ export const getScanById = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, message: 'Failed to retrieve scan', error: error.message });
   }
 };
+
+export const deleteScan = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const scan = await prisma.scanJob.findUnique({ where: { id } });
+    if (!scan) {
+      return res.status(404).json({ success: false, message: 'Scan record not found' });
+    }
+
+    await prisma.scanJob.delete({ where: { id } });
+
+    await prisma.auditLog.create({
+      data: {
+        action: 'SCAN_DELETED',
+        entityType: 'ScanJob',
+        entityId: id,
+        details: JSON.stringify({ targetHost: scan.targetHost }),
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Scan record for "${scan.targetHost}" deleted successfully.`,
+    });
+  } catch (error: any) {
+    console.error('Failed to delete scan:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete scan record', error: error.message });
+  }
+};
+
+export const clearAllScans = async (req: Request, res: Response) => {
+  try {
+    const result = await prisma.scanJob.deleteMany({});
+    res.status(200).json({
+      success: true,
+      message: `Cleared ${result.count} scan record(s).`,
+    });
+  } catch (error: any) {
+    console.error('Failed to clear scans:', error);
+    res.status(500).json({ success: false, message: 'Failed to clear scan records', error: error.message });
+  }
+};
+

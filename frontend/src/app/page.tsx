@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   AlertCircle,
   HelpCircle,
+  Trash2,
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import { DashboardStats, fetchApi } from '@/lib/api';
@@ -24,6 +25,7 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deletingScanId, setDeletingScanId] = useState<string | null>(null);
 
   const loadStats = async () => {
     try {
@@ -38,6 +40,33 @@ export default function DashboardPage() {
       setError(err.message || 'Cannot connect to backend assessment server');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeleteScan = async (id: string, host: string) => {
+    if (!confirm(`Are you sure you want to cut/remove recent scan for "${host}"?`)) return;
+    setDeletingScanId(id);
+    try {
+      const res = await fetchApi<any>(`/scans/${id}`, { method: 'DELETE' });
+      if (res.success) {
+        await loadStats();
+      }
+    } catch (err: any) {
+      alert(`Failed to delete scan: ${err.message || 'Error occurred'}`);
+    } finally {
+      setDeletingScanId(null);
+    }
+  };
+
+  const handleClearAllScans = async () => {
+    if (!confirm('Are you sure you want to cut/clear all recent scan records?')) return;
+    try {
+      const res = await fetchApi<any>('/scans', { method: 'DELETE' });
+      if (res.success) {
+        await loadStats();
+      }
+    } catch (err: any) {
+      alert(`Failed to clear scans: ${err.message || 'Error occurred'}`);
     }
   };
 
@@ -284,18 +313,33 @@ export default function DashboardPage() {
                   <Radio className="w-4 h-4 text-emerald-600" />
                   Recent Scans
                 </h3>
-                <Link
-                  href="/scan-import"
-                  className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold"
-                >
-                  New Scan &rarr;
-                </Link>
+                <div className="flex items-center gap-2">
+                  {stats?.recentScans && stats.recentScans.length > 0 && (
+                    <button
+                      onClick={handleClearAllScans}
+                      className="text-[11px] text-red-600 hover:text-red-700 font-semibold flex items-center gap-1 hover:bg-red-50 px-2 py-0.5 rounded border border-red-200 transition"
+                      title="Cut / Remove all recent scans"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      Cut All
+                    </button>
+                  )}
+                  <Link
+                    href="/scan-import"
+                    className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold"
+                  >
+                    New Scan &rarr;
+                  </Link>
+                </div>
               </div>
 
               <div className="mt-3 divide-y divide-slate-100">
                 {stats?.recentScans && stats.recentScans.length > 0 ? (
-                  stats.recentScans.slice(0, 4).map((scan) => (
-                    <div key={scan.id} className="py-2.5 flex items-center justify-between text-xs">
+                  stats.recentScans.slice(0, 5).map((scan) => (
+                    <div
+                      key={scan.id}
+                      className="py-2.5 flex items-center justify-between text-xs hover:bg-slate-50 px-2 rounded -mx-2 transition"
+                    >
                       <div>
                         <p className="font-semibold text-slate-900 font-mono">
                           {scan.targetHost}
@@ -305,9 +349,20 @@ export default function DashboardPage() {
                           {scan.certKeySize ? `(${scan.certKeySize}b)` : ''}
                         </p>
                       </div>
-                      <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        {scan.status}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          {scan.status}
+                        </span>
+                        <button
+                          onClick={() => handleDeleteScan(scan.id, scan.targetHost)}
+                          disabled={deletingScanId === scan.id}
+                          className="px-2 py-1 rounded text-xs text-slate-400 hover:text-red-600 hover:bg-red-50 border border-transparent hover:border-red-200 transition flex items-center gap-1"
+                          title="Cut / Remove this recent scan"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-slate-400 hover:text-red-600" />
+                          <span className="text-[11px] font-medium text-slate-600 hover:text-red-600">Cut</span>
+                        </button>
+                      </div>
                     </div>
                   ))
                 ) : (
