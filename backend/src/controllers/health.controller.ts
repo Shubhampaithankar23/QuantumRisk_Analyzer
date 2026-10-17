@@ -89,3 +89,31 @@ export const getRules = (req: Request, res: Response) => {
     },
   });
 };
+
+export const getInstitution = async (req: Request, res: Response) => {
+  try {
+    const institution = await prisma.institution.findFirst({
+      include: {
+        users: { select: { id: true, name: true, email: true, role: true } },
+      },
+    });
+    res.status(200).json({ success: true, data: institution });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: 'Failed to retrieve institution', error: error.message });
+  }
+};
+
+export const getAuditLogs = async (req: Request, res: Response) => {
+  try {
+    const logs = await prisma.auditLog.findMany({
+      take: 50,
+      orderBy: { timestamp: 'desc' },
+      include: {
+        user: { select: { name: true, email: true } },
+      },
+    });
+    res.status(200).json({ success: true, data: logs });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: 'Failed to retrieve audit logs', error: error.message });
+  }
+};

@@ -12,6 +12,8 @@ import dashboardRoutes from './routes/dashboard.routes';
 import assetRoutes from './routes/asset.routes';
 import importRoutes from './routes/import.routes';
 import scannerRoutes from './routes/scanner.routes';
+import assessmentRoutes from './routes/assessment.routes';
+import reportRoutes from './routes/report.routes';
 
 dotenv.config();
 
@@ -46,6 +48,8 @@ app.use('/api/v1', dashboardRoutes);
 app.use('/api/v1', assetRoutes);
 app.use('/api/v1', importRoutes);
 app.use('/api/v1', scannerRoutes);
+app.use('/api/v1', assessmentRoutes);
+app.use('/api/v1', reportRoutes);
 app.use('/api/v1/auth', authRoutes);
 
 // Central Error Handler
