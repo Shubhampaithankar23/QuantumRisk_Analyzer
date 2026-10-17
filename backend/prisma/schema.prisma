@@ -1,0 +1,210 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Institution {
+  id           String      @id @default(cuid())
+  name         String
+  domain       String
+  contactEmail String?
+  type         String      @default("UNIVERSITY") // UNIVERSITY, COLLEGE, RESEARCH_INSTITUTION, OTHER
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  users        User[]
+  assets       Asset[]
+  importJobs   ImportJob[]
+  auditLogs    AuditLog[]
+}
+
+model User {
+  id            String       @id @default(cuid())
+  email         String       @unique
+  passwordHash  String
+  name          String
+  role          String       @default("ANALYST") // ADMIN, ANALYST, VIEWER
+  institutionId String?
+  institution   Institution? @relation(fields: [institutionId], references: [id], onDelete: SetNull)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  auditLogs     AuditLog[]
+  scanJobs      ScanJob[]
+}
+
+model Asset {
+  id                String       @id @default(cuid())
+  name              String
+  identifier        String       // Hostname, IP, ARN, or service identifier
+  assetType         String       // WEBSITE, SERVER, APPLICATION, DATABASE, DIGITAL_CERTIFICATE, STORAGE_BACKUP
+  institutionId     String
+  institution       Institution  @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  dataSensitivity   String       @default("CONFIDENTIAL") // PUBLIC, INTERNAL, CONFIDENTIAL, HIGHLY_SENSITIVE, REGULATED
+  knownAlgorithms   String?      // Stored JSON array or text representation of reported cryptosystems
+  informationSource String       @default("MANUAL") // TLS_SCAN, IMPORT_CSV, IMPORT_XLSX, IMPORT_JSON, MANUAL
+  assessmentStatus  String       @default("PENDING") // PENDING, ASSESSED, HIGH_RISK, LOW_RISK, EXEMPT
+  tlsVersion        String?
+  port              Int          @default(443)
+  environment       String       @default("PRODUCTION") // PRODUCTION, STAGING, DEVELOPMENT
+  notes             String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  scanJobs          ScanJob[]
+  assessments       Assessment[]
+  findings          Finding[]
+}
+
+model ScanJob {
+  id                     String       @id @default(cuid())
+  assetId                String?
+  asset                  Asset?       @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  targetHost             String
+  port                   Int          @default(443)
+  status                 String       @default("PENDING") // PENDING, RUNNING, COMPLETED, FAILED, REJECTED
+  scanType               String       @default("TLS_INSPECTION")
+  authorizationConfirmed Boolean      @default(false)
+  authorizedBy           String?
+  ipAddress              String?
+  executionTimeMs        Int?
+  errorMessage           String?
+  userId                 String?
+  user                   User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  startedAt              DateTime?
+  completedAt            DateTime?
+  createdAt              DateTime     @default(now())
+  results                ScanResult[]
+}
+
+model ScanResult {
+  id                    String    @id @default(cuid())
+  scanJobId             String
+  scanJob               ScanJob   @relation(fields: [scanJobId], references: [id], onDelete: Cascade)
+  targetHost            String
+  port                  Int
+  tlsVersionNegotiated  String?
+  supportedTlsVersions  String?   // JSON array
+  cipherSuiteNegotiated String?
+  supportedCipherSuites String?   // JSON array
+  certSubject           String?
+  certIssuer            String?
+  certValidFrom         DateTime?
+  certValidTo           DateTime?
+  certPubKeyAlgo        String?   // e.g., RSA, ECDSA
+  certKeySize           Int?      // e.g., 2048, 4096, 256, 384
+  certSignatureAlgo     String?
+  certSerial            String?
+  keyExchangeGroup      String?   // e.g., X25519, secp256r1
+  isPqHybrid            Boolean   @default(false)
+  ocspStapled           Boolean   @default(false)
+  rawDetails            String?   // Full structured JSON output
+  createdAt             DateTime  @default(now())
+}
+
+model Assessment {
+  id                     String    @id @default(cuid())
+  assetId                String
+  asset                  Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  title                  String
+  ruleVersion            String    @default("2024.1-NIST-FIPS")
+  quantumRiskScore       Int       // 0 - 100
+  overallReadinessStatus String    // QUANTUM_VULNERABLE, TRANSITION_REQUIRED, HYBRID_READY, POST_QUANTUM_READY
+  summary                String
+  methodology            String
+  assessedAt             DateTime  @default(now())
+  findings               Finding[]
+}
+
+model Finding {
+  id                String            @id @default(cuid())
+  assessmentId      String?
+  assessment        Assessment?       @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  assetId           String
+  asset             Asset             @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  title             String
+  algorithmOrConfig String
+  purpose           String            // DIGITAL_SIGNATURE, KEY_ESTABLISHMENT, SYMMETRIC_ENCRYPTION, HASH_FUNCTION, PROTOCOL
+  riskLevel         String            // CRITICAL, HIGH, MEDIUM, LOW, INFORMATIONAL
+  riskReason        String
+  evidenceSource    String            // VERIFIED_SCAN, IMPORTED_EVIDENCE, MANUAL_ENTRY, SYSTEM_INFERRED
+  standardRef       String            // e.g., NIST FIPS 204, NIST FIPS 203
+  confidence        String            @default("HIGH") // HIGH, MEDIUM, NEEDS_VERIFICATION
+  status            String            @default("OPEN") // OPEN, IN_PROGRESS, RESOLVED, ACCEPTED_RISK
+  owner             String?
+  priority          String            @default("HIGH") // CRITICAL, HIGH, MEDIUM, LOW
+  dueDate           DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  recommendations   Recommendation[]
+  remediationTasks  RemediationTask[]
+}
+
+model Recommendation {
+  id                   String   @id @default(cuid())
+  findingId            String
+  finding              Finding  @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  recommendedAlgorithm String
+  rationale            String
+  whyAppropriate       String
+  compatibilityNotes   String
+  migrationSteps       String   // JSON string array
+  standardRef          String
+  urgency              String   @default("HIGH")
+  createdAt            DateTime @default(now())
+}
+
+model ImportJob {
+  id            String        @id @default(cuid())
+  institutionId String
+  institution   Institution   @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  filename      String
+  fileFormat    String        // CSV, XLSX, JSON
+  totalRows     Int           @default(0)
+  importedRows  Int           @default(0)
+  failedRows    Int           @default(0)
+  duplicateRows Int           @default(0)
+  status        String        @default("COMPLETED") // PENDING, PROCESSING, COMPLETED, FAILED
+  createdAt     DateTime      @default(now())
+  errors        ImportError[]
+}
+
+model ImportError {
+  id          String    @id @default(cuid())
+  importJobId String
+  importJob   ImportJob @relation(fields: [importJobId], references: [id], onDelete: Cascade)
+  rowNumber   Int
+  rawData     String?
+  errorMessage String
+}
+
+model RemediationTask {
+  id              String    @id @default(cuid())
+  findingId       String
+  finding         Finding   @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  title           String
+  description     String
+  assignedTo      String?
+  status          String    @default("OPEN") // OPEN, IN_PROGRESS, COMPLETED, BLOCKED
+  priority        String    @default("HIGH") // CRITICAL, HIGH, MEDIUM, LOW
+  dueDate         DateTime?
+  resolvedAt      DateTime?
+  resolutionNotes String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model AuditLog {
+  id            String       @id @default(cuid())
+  userId        String?
+  user          User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  institutionId String?
+  institution   Institution? @relation(fields: [institutionId], references: [id], onDelete: SetNull)
+  action        String
+  entityType    String
+  entityId      String?
+  details       String?
+  ipAddress     String?
+  timestamp     DateTime     @default(now())
+}
