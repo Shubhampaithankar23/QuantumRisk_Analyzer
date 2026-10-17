@@ -9,6 +9,9 @@ import { errorHandler } from './middleware/errorHandler';
 import healthRoutes from './routes/health.routes';
 import authRoutes from './routes/auth.routes';
 import dashboardRoutes from './routes/dashboard.routes';
+import assetRoutes from './routes/asset.routes';
+import importRoutes from './routes/import.routes';
+import scannerRoutes from './routes/scanner.routes';
 
 dotenv.config();
 
@@ -40,6 +43,9 @@ app.use(standardLimiter);
 // API v1 Base Route
 app.use('/api/v1', healthRoutes);
 app.use('/api/v1', dashboardRoutes);
+app.use('/api/v1', assetRoutes);
+app.use('/api/v1', importRoutes);
+app.use('/api/v1', scannerRoutes);
 app.use('/api/v1/auth', authRoutes);
 
 // Central Error Handler
