@@ -12,7 +12,8 @@
     "prisma:migrate": "prisma migrate dev --name init",
     "prisma:push": "prisma db push",
     "prisma:seed": "ts-node src/lib/seed.ts",
-    "test": "jest --detectOpenHandles"
+    "test": "jest --detectOpenHandles",
+    "e2e:scan": "ts-node -r dotenv/config scripts/run_e2e_real_scan.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.19.1",
