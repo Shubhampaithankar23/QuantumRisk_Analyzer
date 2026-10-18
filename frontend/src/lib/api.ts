@@ -1,4 +1,54 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
+
+export class ApiError extends Error {
+  status: number;
+  statusText: string;
+  code?: string;
+  details?: any;
+  data?: any;
+  body?: string;
+
+  constructor(status: number, statusText: string, message: string, code?: string, details?: any, data?: any, body?: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.statusText = statusText;
+    this.code = code;
+    this.details = details;
+    this.data = data;
+    this.body = body;
+  }
+}
+
+export function buildApiUrl(endpoint: string): string {
+  if (endpoint.startsWith('http')) return endpoint;
+
+  const base = (API_BASE || '/api/v1').replace(/\/+$/, '');
+  let path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+
+  // If base already ends with /api/v1 and path starts with /api/v1, de-duplicate
+  if (base.endsWith('/api/v1') && path.startsWith('/api/v1')) {
+    path = path.substring('/api/v1'.length);
+    if (!path.startsWith('/')) path = `/${path}`;
+  }
+
+  // If base is an absolute HTTP/HTTPS URL (e.g. production cloud URL)
+  if (base.startsWith('http')) {
+    return `${base}${path}`;
+  }
+
+  // If running in browser, relative URL works seamlessly across laptop, localhost, and mobile device
+  if (typeof window !== 'undefined') {
+    return `${base}${path}`;
+  }
+
+  // If running server-side without window, resolve to internal backend URL
+  const serverTarget =
+    process.env.BACKEND_INTERNAL_URL ||
+    process.env.BACKEND_URL ||
+    'http://127.0.0.1:4000/api/v1';
+  return `${serverTarget.replace(/\/+$/, '')}${path}`;
+}
 
 export function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -35,7 +85,7 @@ export function logout() {
 }
 
 export async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
+  const url = buildApiUrl(endpoint);
   const token = getAuthToken();
 
   const isFormData = typeof FormData !== 'undefined' && options?.body instanceof FormData;
@@ -45,13 +95,36 @@ export async function fetchApi<T>(endpoint: string, options?: RequestInit): Prom
     ...(options?.headers as Record<string, string>),
   };
 
-  const response = await fetch(url, {
-    ...options,
-    headers,
-    cache: 'no-store',
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers,
+      cache: 'no-store',
+    });
+  } catch (networkErr: any) {
+    const rawMsg = networkErr?.message || 'Network connection failed';
+    const isFailedToFetch =
+      rawMsg.toLowerCase().includes('failed to fetch') ||
+      rawMsg.toLowerCase().includes('network') ||
+      rawMsg.toLowerCase().includes('load failed');
 
-  const data = await response.json().catch(() => ({}));
+    const enrichedMsg = isFailedToFetch
+      ? `Network Connection Failure: Unable to reach backend at "${url}". Please ensure the backend server is running and accessible.`
+      : `Network Error: ${rawMsg} (URL: ${url})`;
+
+    throw new Error(enrichedMsg);
+  }
+
+  let responseBodyText = '';
+  let data: any = {};
+  try {
+    responseBodyText = await response.text();
+    data = JSON.parse(responseBodyText);
+  } catch {
+    data = responseBodyText ? { message: responseBodyText } : {};
+  }
+
   if (!response.ok) {
     if (response.status === 401) {
       logout();
@@ -59,8 +132,47 @@ export async function fetchApi<T>(endpoint: string, options?: RequestInit): Prom
         window.location.href = '/login';
       }
     }
-    throw new Error(data.message || `Request failed with status ${response.status}`);
+
+    const statusText = response.statusText ? ` ${response.statusText}` : '';
+    const mainMsg =
+      data?.message ||
+      data?.error?.message ||
+      data?.error ||
+      (typeof data === 'string' && data ? data : response.statusText || 'Server Error');
+
+    const codeTag = data?.code ? ` [${data.code}]` : '';
+
+    let detailsStr = '';
+    if (data?.details) {
+      if (Array.isArray(data.details)) {
+        detailsStr =
+          ' - ' +
+          data.details
+            .map((d: any) =>
+              typeof d === 'object'
+                ? `${d.field ? `${d.field}: ` : ''}${d.message || JSON.stringify(d)}`
+                : String(d)
+            )
+            .join('; ');
+      } else if (typeof data.details === 'object') {
+        detailsStr = ' - ' + JSON.stringify(data.details);
+      } else {
+        detailsStr = ` - ${data.details}`;
+      }
+    }
+
+    const fullMessage = `HTTP ${response.status}${statusText}${codeTag}: ${mainMsg}${detailsStr}`;
+    throw new ApiError(
+      response.status,
+      response.statusText,
+      fullMessage,
+      data?.code,
+      data?.details,
+      data,
+      responseBodyText
+    );
   }
+
   return data;
 }
 

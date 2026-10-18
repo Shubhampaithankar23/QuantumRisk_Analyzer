@@ -581,8 +581,14 @@ export default function ScanAndImportPage() {
               )}
 
               {importError && (
-                <div className="p-3.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs">
-                  {importError}
+                <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs space-y-1.5 shadow-sm">
+                  <div className="flex items-center gap-2 font-bold text-red-900">
+                    <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+                    <span>Import Preview Error</span>
+                  </div>
+                  <p className="font-mono text-[11px] leading-relaxed break-words bg-white/70 p-2.5 rounded border border-red-100">
+                    {importError}
+                  </p>
                 </div>
               )}
 
