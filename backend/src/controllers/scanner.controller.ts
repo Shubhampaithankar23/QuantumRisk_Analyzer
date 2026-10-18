@@ -95,6 +95,27 @@ export const startScan = async (req: Request, res: Response) => {
       },
     });
 
+    // Build verified observed algorithms without synthetic 'Unknown' placeholders
+    const verifiedAlgos: Array<{ algorithm: string; purpose: string }> = [];
+    if (scanOutput.certPubKeyAlgo && scanOutput.certPubKeyAlgo !== 'Not Observed' && scanOutput.certPubKeyAlgo !== 'Unknown') {
+      verifiedAlgos.push({
+        algorithm: `${scanOutput.certPubKeyAlgo}${scanOutput.certKeySize ? `-${scanOutput.certKeySize}` : ''}`,
+        purpose: 'DIGITAL_SIGNATURE',
+      });
+    }
+    if (scanOutput.keyExchangeGroup && scanOutput.keyExchangeGroup !== 'Not Observed' && scanOutput.keyExchangeGroup !== 'Unknown') {
+      verifiedAlgos.push({
+        algorithm: scanOutput.keyExchangeGroup,
+        purpose: 'KEY_ESTABLISHMENT',
+      });
+    }
+    if (scanOutput.cipherSuiteNegotiated) {
+      verifiedAlgos.push({
+        algorithm: scanOutput.cipherSuiteNegotiated,
+        purpose: 'SYMMETRIC_ENCRYPTION',
+      });
+    }
+
     // Update or link asset if one exists, or create a verified asset record
     let linkedAssetId = assetId;
     if (!linkedAssetId) {
@@ -108,11 +129,7 @@ export const startScan = async (req: Request, res: Response) => {
           data: {
             tlsVersion: scanOutput.tlsVersionNegotiated || existingAsset.tlsVersion,
             informationSource: 'TLS_SCAN',
-            knownAlgorithms: JSON.stringify([
-              { algorithm: scanOutput.certPubKeyAlgo || 'Unknown', purpose: 'DIGITAL_SIGNATURE' },
-              { algorithm: scanOutput.keyExchangeGroup || 'Unknown', purpose: 'KEY_ESTABLISHMENT' },
-              { algorithm: scanOutput.cipherSuiteNegotiated || 'Unknown', purpose: 'SYMMETRIC_ENCRYPTION' },
-            ]),
+            knownAlgorithms: JSON.stringify(verifiedAlgos),
           },
         });
       } else {
@@ -125,15 +142,11 @@ export const startScan = async (req: Request, res: Response) => {
               assetType: 'WEBSITE',
               institutionId: institution.id,
               dataSensitivity: 'CONFIDENTIAL',
-              tlsVersion: scanOutput.tlsVersionNegotiated || 'Unknown',
+              tlsVersion: scanOutput.tlsVersionNegotiated || null,
               port: scanOutput.port,
               informationSource: 'TLS_SCAN',
               assessmentStatus: 'PENDING',
-              knownAlgorithms: JSON.stringify([
-                { algorithm: scanOutput.certPubKeyAlgo || 'Unknown', purpose: 'DIGITAL_SIGNATURE' },
-                { algorithm: scanOutput.keyExchangeGroup || 'Unknown', purpose: 'KEY_ESTABLISHMENT' },
-                { algorithm: scanOutput.cipherSuiteNegotiated || 'Unknown', purpose: 'SYMMETRIC_ENCRYPTION' },
-              ]),
+              knownAlgorithms: JSON.stringify(verifiedAlgos),
               notes: `Discovered and verified via authorized live TLS inspection on ${new Date().toISOString()}`,
             },
           });

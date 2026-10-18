@@ -15,21 +15,42 @@ export interface ScanTargetInput {
 export interface ScanOutput {
   targetHost: string;
   resolvedIp: string;
+  allResolvedIps?: string[];
   port: number;
   tlsVersionNegotiated?: string;
   supportedTlsVersions: string[];
+  versionProbes?: Array<{ version: string; supported: boolean; cipher?: string; error?: string }>;
   cipherSuiteNegotiated?: string;
+  supportedCipherSuites?: string[];
+  supportedCurves?: string[];
   certSubject?: string;
   certIssuer?: string;
   certValidFrom?: Date;
   certValidTo?: Date;
   certPubKeyAlgo?: string;
   certKeySize?: number;
+  certCurve?: string;
   certSignatureAlgo?: string;
+  certSignatureHash?: string;
   certSerial?: string;
+  certSha256Fingerprint?: string;
   certSans?: string[];
+  isSelfSigned?: boolean;
   keyExchangeGroup?: string;
   isPqHybrid: boolean;
+  groupProbes?: Array<{ group: string; status: string; limitation?: string }>;
+  certificateChain?: any[];
+  dualCertificates?: any[];
+  validation?: {
+    isValid: boolean;
+    isExpired: boolean;
+    isSelfSigned: boolean;
+    isUntrusted: boolean;
+    hostnameMatches: boolean;
+    errors: string[];
+  };
+  ipProbes?: any[];
+  ipDifferences?: any;
   ocspStapled: boolean;
   scannerVersion: string;
   scannedAt: string;
@@ -80,6 +101,22 @@ export function isPrivateOrReservedIp(rawIp: string): boolean {
 
     return false;
   } else if (net.isIPv6(ip)) {
+    // RFC 6052 NAT64 Well-Known Prefix (64:ff9b::/96)
+    if (ip.startsWith('64:ff9b::')) {
+      const remainder = ip.replace('64:ff9b::', '');
+      if (remainder.includes('.')) {
+        return isPrivateOrReservedIp(remainder);
+      }
+      const hexParts = remainder.split(':');
+      if (hexParts.length === 2) {
+        const fullHex = hexParts[0].padStart(4, '0') + hexParts[1].padStart(4, '0');
+        const b1 = parseInt(fullHex.substring(0, 2), 16);
+        const b2 = parseInt(fullHex.substring(2, 4), 16);
+        const b3 = parseInt(fullHex.substring(4, 6), 16);
+        const b4 = parseInt(fullHex.substring(6, 8), 16);
+        return isPrivateOrReservedIp(`${b1}.${b2}.${b3}.${b4}`);
+      }
+    }
     // Loopback
     if (ip === '::1' || ip === '::') return true;
     // Link-local (fe80::/10)
@@ -118,8 +155,8 @@ export async function validateScanTarget(hostname: string, port: number = 443): 
     );
   }
 
-  // Port check: strictly allow standard TLS ports
-  const ALLOWED_PORTS = [443, 8443];
+  // Port check: allow standard TLS and testing ports (reject 22, 80, 8080)
+  const ALLOWED_PORTS = [443, 8443, 1010, 9443, 4433];
   if (!ALLOWED_PORTS.includes(port)) {
     throw new Error(
       `Port ${port} is not permitted for authorized public TLS inspection. Permitted ports: [${ALLOWED_PORTS.join(', ')}].`
@@ -270,23 +307,37 @@ async function scanWithPythonService(targetHost: string, pinnedIp: string, port:
     return {
       targetHost: res.target_host,
       resolvedIp: res.resolved_ip || pinnedIp,
+      allResolvedIps: res.all_resolved_ips || [res.resolved_ip || pinnedIp],
       port: res.port,
       tlsVersionNegotiated: res.tls_version_negotiated,
       supportedTlsVersions: res.supported_tls_versions || [],
+      versionProbes: res.version_probes || [],
       cipherSuiteNegotiated: res.cipher_suite_negotiated,
+      supportedCipherSuites: res.supported_cipher_suites || [],
+      supportedCurves: res.supported_curves || [],
       certSubject: res.cert_subject,
       certIssuer: res.cert_issuer,
       certValidFrom: res.cert_valid_from ? new Date(res.cert_valid_from) : undefined,
       certValidTo: res.cert_valid_to ? new Date(res.cert_valid_to) : undefined,
       certPubKeyAlgo: res.cert_pub_key_algo,
       certKeySize: res.cert_key_size,
+      certCurve: res.cert_curve,
       certSignatureAlgo: res.cert_signature_algo,
+      certSignatureHash: res.cert_signature_hash,
       certSerial: res.cert_serial,
+      certSha256Fingerprint: res.cert_sha256_fingerprint,
       certSans: res.cert_sans || [],
+      isSelfSigned: res.is_self_signed || false,
       keyExchangeGroup: res.key_exchange_group,
       isPqHybrid: res.is_pq_hybrid || false,
+      groupProbes: res.group_probes || [],
+      certificateChain: res.certificate_chain || [],
+      dualCertificates: res.dual_certificates || [],
+      validation: res.validation || undefined,
+      ipProbes: res.ip_probes || [],
+      ipDifferences: res.ip_differences || {},
       ocspStapled: res.ocsp_stapled || false,
-      scannerVersion: res.scanner_engine || 'SSLyze-v6.3.1',
+      scannerVersion: res.scanner_engine || 'SSLyze-v6.3.1 / OpenSSL-3.5.5',
       scannedAt: res.scanned_at || new Date().toISOString(),
       limitations: res.limitations || undefined,
       rawDetails: res.raw_details || {},
@@ -345,8 +396,8 @@ export async function executeTlsScan(
 
     const { cipher, protocol, cert } = negotiatedDetails;
 
-    // Parse cert algorithm and key size
-    let certPubKeyAlgo = 'Unknown';
+    // Parse cert algorithm and key size without synthetic assumptions
+    let certPubKeyAlgo: string | undefined = undefined;
     let certKeySize: number | undefined;
 
     if (cert) {
@@ -355,26 +406,31 @@ export async function executeTlsScan(
         const pkString = cert.pubkey.toString('utf8');
         if (pkString.includes('RSA')) certPubKeyAlgo = 'RSA';
         else if (pkString.includes('EC') || pkString.includes('Elliptic')) certPubKeyAlgo = 'ECDSA';
-      } else if (cert.subjectaltname || cert.subject) {
-        if (cert.sigalg?.toUpperCase().includes('RSA')) certPubKeyAlgo = 'RSA';
-        else if (cert.sigalg?.toUpperCase().includes('ECDSA')) certPubKeyAlgo = 'ECDSA';
-        else certPubKeyAlgo = 'RSA';
+      } else if (cert.sigalg) {
+        if (cert.sigalg.toUpperCase().includes('RSA')) certPubKeyAlgo = 'RSA';
+        else if (cert.sigalg.toUpperCase().includes('ECDSA')) certPubKeyAlgo = 'ECDSA';
       }
     }
 
     const cipherName = cipher ? cipher.name : undefined;
-    let keyExchangeGroup = 'Unknown';
+    let keyExchangeGroup: string = 'Not Observed';
     let isPqHybrid = false;
+    let fallbackLimitation = 'Node-TLS (Limited Fallback): ephemeral key exchange group could not be observed from Node.js TLS binding.';
 
-    if (cipherName?.includes('MLKEM') || cipherName?.includes('KYBER')) {
+    if (negotiatedDetails.ephemeralKeyInfo) {
+      const ek = negotiatedDetails.ephemeralKeyInfo;
+      if (ek.name) {
+        keyExchangeGroup = ek.name;
+        fallbackLimitation = `Node-TLS (Limited Fallback): ephemeral key exchange group observed as ${ek.name}.`;
+      } else if (ek.type) {
+        keyExchangeGroup = `${ek.type}${ek.size ? `-${ek.size}` : ''}`;
+        fallbackLimitation = `Node-TLS (Limited Fallback): ephemeral key exchange observed as ${keyExchangeGroup}.`;
+      }
+    } else if (cipherName?.includes('MLKEM') || cipherName?.includes('KYBER')) {
       isPqHybrid = true;
-      keyExchangeGroup = 'X25519MLKEM768 (Hybrid Post-Quantum)';
-    } else if (cipherName?.includes('ECDHE') || protocol === 'TLSv1.3') {
-      keyExchangeGroup = 'ECDHE (Classical)';
-    } else if (cipherName?.includes('DHE')) {
-      keyExchangeGroup = 'DHE (Classical Finite Field)';
-    } else if (cipherName?.includes('RSA')) {
-      keyExchangeGroup = 'RSA Key Transport (Static Legacy)';
+      keyExchangeGroup = cipherName.includes('MLKEM') ? 'X25519MLKEM768' : 'X25519Kyber768';
+    } else if (cipherName?.startsWith('TLS_RSA_WITH_')) {
+      keyExchangeGroup = 'RSA Key Transport (No Ephemeral Key Exchange)';
     }
 
     scanOutput = {
@@ -395,9 +451,9 @@ export async function executeTlsScan(
       keyExchangeGroup,
       isPqHybrid,
       ocspStapled: false,
-      scannerVersion: `Node-TLS/OpenSSL-${process.versions.openssl}`,
+      scannerVersion: 'Node-TLS (Limited Fallback)',
       scannedAt: new Date().toISOString(),
-      limitations: 'Node.js native TLS inspection used; post-quantum hybrid group observation capabilities are limited by host OpenSSL build.',
+      limitations: fallbackLimitation,
       rawDetails: {
         negotiatedProtocol: protocol,
         negotiatedCipher: cipher,
@@ -485,7 +541,7 @@ export async function executeTlsScan(
       });
 
       // Create first-class Evidence records
-      if (scanOutput.certPubKeyAlgo && scanOutput.certPubKeyAlgo !== 'Unknown') {
+      if (scanOutput.certPubKeyAlgo && scanOutput.certPubKeyAlgo !== 'Unknown' && scanOutput.certPubKeyAlgo !== 'Not Observed') {
         await prisma.evidence.create({
           data: {
             scanJobId,
@@ -545,7 +601,7 @@ export async function executeTlsScan(
         });
       }
 
-      if (scanOutput.keyExchangeGroup && scanOutput.keyExchangeGroup !== 'Unknown') {
+      if (scanOutput.keyExchangeGroup && scanOutput.keyExchangeGroup !== 'Unknown' && scanOutput.keyExchangeGroup !== 'Not Observed') {
         await prisma.evidence.create({
           data: {
             scanJobId,
@@ -564,6 +620,48 @@ export async function executeTlsScan(
             hashDigest,
           },
         });
+      }
+
+      // Record dual certificate evidence if present
+      if (scanOutput.dualCertificates && scanOutput.dualCertificates.length > 0) {
+        for (const dc of scanOutput.dualCertificates) {
+          await prisma.evidence.create({
+            data: {
+              scanJobId,
+              assetId,
+              evidenceSource: 'scanner_verified',
+              evidenceType: 'X509_CERTIFICATE',
+              observedProperty: 'dual_cert_pub_key_algo',
+              observedValue: `${dc.pub_key_algo}${dc.key_size ? `-${dc.key_size}` : ''}`,
+              rawPayload: JSON.stringify(dc),
+              scannerVersion: scanOutput.scannerVersion,
+              verifiedAt: new Date(),
+              hashDigest: crypto.createHash('sha256').update(JSON.stringify(dc)).digest('hex'),
+            },
+          });
+        }
+      }
+
+      // Record individually probed groups evidence
+      if (scanOutput.groupProbes) {
+        for (const gp of scanOutput.groupProbes) {
+          if (gp.status === 'supported (probed)' || gp.status === 'negotiated') {
+            await prisma.evidence.create({
+              data: {
+                scanJobId,
+                assetId,
+                evidenceSource: 'scanner_verified',
+                evidenceType: 'KEY_EXCHANGE',
+                observedProperty: 'supported_group_probed',
+                observedValue: gp.group,
+                rawPayload: JSON.stringify(gp),
+                scannerVersion: scanOutput.scannerVersion,
+                verifiedAt: new Date(),
+                hashDigest: crypto.createHash('sha256').update(JSON.stringify(gp)).digest('hex'),
+              },
+            });
+          }
+        }
       }
     } catch (saveErr) {
       console.warn('[ScanCheck/Evidence Save Warning]:', saveErr);

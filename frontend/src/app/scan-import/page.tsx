@@ -784,7 +784,7 @@ export default function ScanAndImportPage() {
                     ].map(([label, value]) => (
                       <div key={label} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                         <span className="mb-1 block text-[11px] text-slate-500">{label}</span>
-                        <span className="break-words font-semibold text-slate-900">{value || 'Not available'}</span>
+                        <span className="break-words font-semibold text-slate-900">{value || 'Not Observed'}</span>
                       </div>
                     ))}
                   </div>

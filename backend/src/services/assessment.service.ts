@@ -623,28 +623,75 @@ export async function runAssessmentForAsset(assetId: string): Promise<Assessment
 
   if (scanResult) {
     // Certificate public key
-    if (scanResult.certPubKeyAlgo && scanResult.certPubKeyAlgo !== 'Unknown') {
+    if (
+      scanResult.certPubKeyAlgo &&
+      scanResult.certPubKeyAlgo !== 'Unknown' &&
+      scanResult.certPubKeyAlgo !== 'Not Observed'
+    ) {
       const algoStr = `${scanResult.certPubKeyAlgo}${scanResult.certKeySize ? `-${scanResult.certKeySize}` : ''}`;
       const evalItem = evaluateAlgorithm(algoStr, 'DIGITAL_SIGNATURE', 'scanner_verified');
       const matchedEv = latestScan?.evidence?.find((e) => e.observedProperty === 'cert_pub_key_algo');
       if (matchedEv) evalItem.evidenceId = matchedEv.id;
       findingsToCreate.push(evalItem);
     } else {
-      findingsToCreate.push(
-        evaluateAlgorithm('Unknown Certificate Key Algorithm', 'DIGITAL_SIGNATURE', 'scanner_verified')
-      );
+      findingsToCreate.push({
+        title: 'Insufficient Evidence — Public Key Certificate Algorithm Not Observed',
+        algorithmOrConfig: 'Not Observed',
+        observedValue: 'Not Observed',
+        purpose: 'DIGITAL_SIGNATURE',
+        riskLevel: 'INFORMATIONAL',
+        riskReason: 'Cryptographic public key algorithm could not be verified from scan evidence. No risk score applied.',
+        evidenceSource: 'scanner_verified',
+        ruleId: 'INSUFFICIENT-EVIDENCE-CERT',
+        standardRef: 'NIST SP 800-52r2',
+        confidence: 'NEEDS_VERIFICATION',
+        limitations: 'Evidence missing or certificate not presented during handshake.',
+        recommendation: {
+          recommendedAlgorithm: 'NIST FIPS 204 (ML-DSA) or FIPS 186-5 ECDSA / RSA-3072+',
+          rationale: 'Verify public key certificate through authorized administrative inventory or rescanning.',
+          whyAppropriate: 'Cryptographic assessment requires defensible evidence.',
+          compatibilityNotes: 'Ensure target endpoint presents valid X.509 certificate chain.',
+          migrationSteps: ['Verify server certificate configuration', 'Rescan endpoint to capture certificate chain'],
+          standardRef: 'NIST SP 800-52r2',
+          urgency: 'LOW',
+        },
+      });
     }
 
     // Key exchange mechanism
-    if (scanResult.keyExchangeGroup && scanResult.keyExchangeGroup !== 'Unknown Key Exchange') {
+    if (
+      scanResult.keyExchangeGroup &&
+      scanResult.keyExchangeGroup !== 'Unknown Key Exchange' &&
+      scanResult.keyExchangeGroup !== 'Unknown' &&
+      scanResult.keyExchangeGroup !== 'Not Observed'
+    ) {
       const evalItem = evaluateAlgorithm(scanResult.keyExchangeGroup, 'KEY_ESTABLISHMENT', 'scanner_verified');
       const matchedEv = latestScan?.evidence?.find((e) => e.observedProperty === 'key_exchange_group');
       if (matchedEv) evalItem.evidenceId = matchedEv.id;
       findingsToCreate.push(evalItem);
     } else {
-      findingsToCreate.push(
-        evaluateAlgorithm('Unknown Key Exchange Mechanism', 'KEY_ESTABLISHMENT', 'scanner_verified')
-      );
+      findingsToCreate.push({
+        title: 'Insufficient Evidence — Key Exchange Group Not Observed',
+        algorithmOrConfig: 'Not Observed',
+        observedValue: 'Not Observed',
+        purpose: 'KEY_ESTABLISHMENT',
+        riskLevel: 'INFORMATIONAL',
+        riskReason: 'Key exchange group parameter could not be extracted from peer handshake response. No risk score applied.',
+        evidenceSource: 'scanner_verified',
+        ruleId: 'INSUFFICIENT-EVIDENCE-KEM',
+        standardRef: 'NIST SP 800-56Ar3',
+        confidence: 'NEEDS_VERIFICATION',
+        limitations: 'Key exchange group not reported in server handshake response.',
+        recommendation: {
+          recommendedAlgorithm: 'NIST FIPS 203 (ML-KEM) or hybrid X25519MLKEM768',
+          rationale: 'Perform deep probe to observe supported key exchange parameters.',
+          whyAppropriate: 'Cryptographic assessment requires defensible evidence.',
+          compatibilityNotes: 'Ensure TLS 1.3 / 1.2 client can negotiate supported groups with server.',
+          migrationSteps: ['Configure TLS server to advertise supported key exchange groups', 'Rescan endpoint'],
+          standardRef: 'NIST SP 800-56Ar3',
+          urgency: 'LOW',
+        },
+      });
     }
 
     // Cipher suite
@@ -754,7 +801,11 @@ export async function runAssessmentForAsset(assetId: string): Promise<Assessment
   let hasDefensibleEvidence = false;
 
   for (const f of findingsToCreate) {
-    if (f.ruleId === 'UNKNOWN-CRYPTOGRAPHIC-EVIDENCE') {
+    if (
+      f.ruleId === 'UNKNOWN-CRYPTOGRAPHIC-EVIDENCE' ||
+      f.ruleId.startsWith('INSUFFICIENT-EVIDENCE') ||
+      f.riskLevel === 'INFORMATIONAL'
+    ) {
       contributingFindings.push({
         title: f.title,
         algorithm: f.algorithmOrConfig,
