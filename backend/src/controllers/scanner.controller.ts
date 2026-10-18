@@ -36,10 +36,28 @@ export const startScan = async (req: Request, res: Response) => {
         assetId: assetId || null,
       },
     });
-    scanJobId = scanJob.id;
+    // Record explicit authorization consent in AuditLog
+    await prisma.auditLog.create({
+      data: {
+        userId: req.user?.id || null,
+        institutionId: req.user?.institutionId || null,
+        action: 'SCAN_AUTHORIZATION_CONSENT',
+        entityType: 'ScanJob',
+        entityId: scanJob.id,
+        details: JSON.stringify({
+          targetHost,
+          port,
+          resolvedIp,
+          authorizationConfirmed: confirmAuthorized,
+          authorizedBy: req.user?.email || 'Authorized Security Administrator',
+          timestamp: new Date().toISOString(),
+        }),
+        ipAddress: req.ip || resolvedIp,
+      },
+    });
 
-    // Execute scan
-    const scanOutput = await executeTlsScan(targetHost, port);
+    // Execute scan with IP pinning and populate ScanCheck / Evidence
+    const scanOutput = await executeTlsScan(targetHost, port, scanJob.id);
     const executionTimeMs = Date.now() - startTime;
 
     // Save ScanResult
@@ -188,6 +206,8 @@ export const getScans = async (req: Request, res: Response) => {
           take: 1,
           orderBy: { createdAt: 'desc' },
         },
+        checks: true,
+        evidence: true,
         asset: {
           select: { id: true, name: true, identifier: true, assetType: true },
         },
@@ -208,6 +228,8 @@ export const getScanById = async (req: Request, res: Response) => {
       where: { id },
       include: {
         results: true,
+        checks: true,
+        evidence: true,
         asset: true,
       },
     });

@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
@@ -8,102 +8,124 @@ import { seedDatabase } from '../lib/seed';
 const JWT_SECRET = process.env.JWT_SECRET || 'pq-readiness-institutional-secret-key-2026-development';
 
 const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(6),
+  email: z.string().email('Valid email address is required'),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
 });
 
-export const login = async (req: Request, res: Response) => {
-  const { email, password } = loginSchema.parse(req.body);
+export const login = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { email, password } = loginSchema.parse(req.body);
 
-  const user = await prisma.user.findUnique({
-    where: { email },
-    include: { institution: true },
-  });
-
-  if (!user) {
-    return res.status(401).json({
-      success: false,
-      message: 'Invalid email or password credentials',
+    const user = await prisma.user.findUnique({
+      where: { email },
+      include: { institution: true },
     });
-  }
 
-  const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
-  if (!isPasswordValid) {
-    return res.status(401).json({
-      success: false,
-      message: 'Invalid email or password credentials',
-    });
-  }
+    if (!user) {
+      return res.status(401).json({
+        code: 'UNAUTHORIZED',
+        message: 'Invalid email or password credentials',
+        details: null,
+        success: false,
+      });
+    }
 
-  const token = jwt.sign(
-    {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      institutionId: user.institutionId,
-    },
-    JWT_SECRET,
-    { expiresIn: '7d' }
-  );
+    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        code: 'UNAUTHORIZED',
+        message: 'Invalid email or password credentials',
+        details: null,
+        success: false,
+      });
+    }
 
-  // Record audit log
-  await prisma.auditLog.create({
-    data: {
-      userId: user.id,
-      institutionId: user.institutionId,
-      action: 'USER_LOGIN',
-      entityType: 'User',
-      entityId: user.id,
-      details: JSON.stringify({ email: user.email, role: user.role }),
-      ipAddress: req.ip,
-    },
-  });
-
-  res.status(200).json({
-    success: true,
-    message: 'Authentication successful',
-    data: {
-      token,
-      user: {
+    const token = jwt.sign(
+      {
         id: user.id,
         email: user.email,
         name: user.name,
         role: user.role,
-        institution: user.institution,
+        institutionId: user.institutionId,
       },
-    },
-  });
+      JWT_SECRET,
+      { expiresIn: '7d' as any }
+    );
+
+    // Record audit log
+    await prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        institutionId: user.institutionId,
+        action: 'USER_LOGIN',
+        entityType: 'User',
+        entityId: user.id,
+        details: JSON.stringify({ email: user.email, role: user.role }),
+        ipAddress: req.ip,
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Authentication successful',
+      data: {
+        token,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          institution: user.institution,
+        },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
 };
 
-export const getMe = async (req: Request, res: Response) => {
-  if (!req.user) {
-    return res.status(401).json({ success: false, message: 'Not authenticated' });
+export const getMe = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({
+        code: 'UNAUTHORIZED',
+        message: 'Not authenticated',
+        details: null,
+        success: false,
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        institution: true,
+        createdAt: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        code: 'NOT_FOUND',
+        message: 'User not found',
+        details: null,
+        success: false,
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: user,
+    });
+  } catch (err) {
+    next(err);
   }
-
-  const user = await prisma.user.findUnique({
-    where: { id: req.user.id },
-    select: {
-      id: true,
-      email: true,
-      name: true,
-      role: true,
-      institution: true,
-      createdAt: true,
-    },
-  });
-
-  if (!user) {
-    return res.status(404).json({ success: false, message: 'User not found' });
-  }
-
-  res.status(200).json({
-    success: true,
-    data: user,
-  });
 };
 
-export const seedDemo = async (req: Request, res: Response) => {
+export const seedDemo = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await seedDatabase();
     res.status(200).json({
@@ -113,10 +135,6 @@ export const seedDemo = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('Failed to seed demo data:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to seed demo data',
-      error: error.message,
-    });
+    next(error);
   }
 };

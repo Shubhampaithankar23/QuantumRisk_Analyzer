@@ -90,12 +90,16 @@ export function parseXlsxBuffer(buffer: Buffer): any[] {
 }
 
 export function parseJsonBuffer(buffer: Buffer): any[] {
-  const text = buffer.toString('utf-8');
-  const parsed = JSON.parse(text);
-  if (Array.isArray(parsed)) return parsed;
-  if (parsed.assets && Array.isArray(parsed.assets)) return parsed.assets;
-  if (parsed.items && Array.isArray(parsed.items)) return parsed.items;
-  return [parsed];
+  try {
+    const text = buffer.toString('utf-8');
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed.assets && Array.isArray(parsed.assets)) return parsed.assets;
+    if (parsed.items && Array.isArray(parsed.items)) return parsed.items;
+    return [parsed];
+  } catch (err: any) {
+    throw new Error(`Invalid JSON file content: ${err.message}`);
+  }
 }
 
 export async function processFileForPreview(
@@ -120,6 +124,7 @@ export async function processFileForPreview(
     select: { identifier: true },
   });
   const existingSet = new Set(existingAssets.map((a) => a.identifier.toLowerCase().trim()));
+  const batchSet = new Set<string>();
 
   const items: ParsedAssetItem[] = [];
 
@@ -154,8 +159,14 @@ export async function processFileForPreview(
       errors.push('Missing required hostname or identifier');
     }
 
-    const cleanIdentifier = (identifier || '').toLowerCase();
-    const isDuplicate = cleanIdentifier ? existingSet.has(cleanIdentifier) : false;
+    const cleanIdentifier = (identifier || '').toLowerCase().trim();
+    let isDuplicate = false;
+    if (cleanIdentifier) {
+      if (existingSet.has(cleanIdentifier) || batchSet.has(cleanIdentifier)) {
+        isDuplicate = true;
+      }
+      batchSet.add(cleanIdentifier);
+    }
 
     let port = 443;
     if (rawPort) {

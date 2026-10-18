@@ -16,7 +16,11 @@ const upload = multer({
 });
 
 router.post('/imports/preview', upload.array('files', 10), previewFiles);
+router.post('/import/preview', upload.array('files', 10), previewFiles);
 router.post('/imports/execute', executeImport);
+router.post('/import/commit', executeImport);
+router.post('/imports/commit', executeImport);
 router.get('/imports/history', getImportHistory);
+router.get('/import/history', getImportHistory);
 
 export default router;

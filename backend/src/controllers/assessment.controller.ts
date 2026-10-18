@@ -68,6 +68,7 @@ export const getAssessments = async (req: Request, res: Response) => {
             identifier: true,
             assetType: true,
             dataSensitivity: true,
+            informationSource: true,
           },
         },
         findings: {
@@ -76,6 +77,9 @@ export const getAssessments = async (req: Request, res: Response) => {
             title: true,
             riskLevel: true,
             status: true,
+            algorithmOrConfig: true,
+            evidenceSource: true,
+            evidenceId: true,
           },
         },
       },
@@ -97,6 +101,7 @@ export const getAssessmentById = async (req: Request, res: Response) => {
         asset: true,
         findings: {
           include: {
+            evidence: true,
             recommendations: true,
             remediationTasks: true,
           },
@@ -117,18 +122,20 @@ export const getAssessmentById = async (req: Request, res: Response) => {
 
 export const getFindings = async (req: Request, res: Response) => {
   try {
-    const { riskLevel, status, purpose, search } = req.query;
+    const { riskLevel, status, purpose, evidenceSource, search } = req.query;
 
     const where: any = {};
     if (riskLevel && riskLevel !== 'ALL') where.riskLevel = String(riskLevel);
     if (status && status !== 'ALL') where.status = String(status);
     if (purpose && purpose !== 'ALL') where.purpose = String(purpose);
+    if (evidenceSource && evidenceSource !== 'ALL') where.evidenceSource = String(evidenceSource);
 
     if (search && typeof search === 'string') {
       where.OR = [
         { title: { contains: search } },
         { algorithmOrConfig: { contains: search } },
         { riskReason: { contains: search } },
+        { ruleId: { contains: search } },
         { asset: { name: { contains: search } } },
         { asset: { identifier: { contains: search } } },
       ];
@@ -145,6 +152,29 @@ export const getFindings = async (req: Request, res: Response) => {
             identifier: true,
             assetType: true,
             dataSensitivity: true,
+            informationSource: true,
+          },
+        },
+        evidence: {
+          select: {
+            id: true,
+            evidenceSource: true,
+            evidenceType: true,
+            observedProperty: true,
+            observedValue: true,
+            rawPayload: true,
+            scannerVersion: true,
+            verifiedAt: true,
+            hashDigest: true,
+            scanJob: {
+              select: {
+                id: true,
+                targetHost: true,
+                port: true,
+                status: true,
+                completedAt: true,
+              },
+            },
           },
         },
         recommendations: true,

@@ -168,10 +168,16 @@ export const createAsset = async (req: Request, res: Response) => {
       });
     }
 
+    const finalIdentifier = (
+      validatedData.identifier && validatedData.identifier.trim() !== ''
+        ? validatedData.identifier.trim()
+        : validatedData.name.toLowerCase().replace(/[^a-z0-9.-]/g, '-')
+    );
+
     // Check duplicate identifier
     const existing = await prisma.asset.findFirst({
       where: {
-        identifier: validatedData.identifier,
+        identifier: finalIdentifier,
         institutionId: institution.id,
       },
     });
@@ -179,31 +185,50 @@ export const createAsset = async (req: Request, res: Response) => {
     if (existing) {
       return res.status(409).json({
         success: false,
-        message: `An asset with identifier "${validatedData.identifier}" already exists.`,
+        message: `An asset with identifier "${finalIdentifier}" already exists.`,
       });
     }
+
+    // Manual asset creation is strictly recorded as MANUAL (user_reported, unverified)
+    // Never allow manual creation to pretend to be a scanner_verified TLS scan
+    const infoSource =
+      validatedData.informationSource && validatedData.informationSource !== 'TLS_SCAN'
+        ? validatedData.informationSource
+        : 'MANUAL';
 
     const newAsset = await prisma.asset.create({
       data: {
         ...validatedData,
+        identifier: finalIdentifier,
+        informationSource: infoSource,
         institutionId: institution.id,
         assessmentStatus: 'PENDING',
       },
     });
 
-    // Audit log
+    // Record initial AuditLog entry
     await prisma.auditLog.create({
       data: {
+        userId: (req as any).user?.id || null,
+        institutionId: institution.id,
         action: 'ASSET_CREATED',
         entityType: 'Asset',
         entityId: newAsset.id,
-        details: JSON.stringify({ name: newAsset.name, identifier: newAsset.identifier }),
+        details: JSON.stringify({
+          name: newAsset.name,
+          identifier: newAsset.identifier,
+          informationSource: newAsset.informationSource,
+          environment: newAsset.environment,
+          dataSensitivity: newAsset.dataSensitivity,
+          knownAlgorithms: newAsset.knownAlgorithms,
+        }),
+        ipAddress: req.ip || req.socket.remoteAddress || null,
       },
     });
 
     res.status(201).json({
       success: true,
-      message: 'Asset successfully registered',
+      message: 'Asset successfully registered (manual / user-reported entry)',
       data: newAsset,
     });
   } catch (error: any) {
@@ -225,17 +250,37 @@ export const updateAsset = async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, message: 'Asset not found' });
     }
 
+    // Prevent changing source to TLS_SCAN manually
+    if (validatedData.informationSource === 'TLS_SCAN' && asset.informationSource !== 'TLS_SCAN') {
+      validatedData.informationSource = asset.informationSource as any;
+    }
+
+    // Compute field-by-field diff for edit history audit
+    const changedFields: Record<string, { before: any; after: any }> = {};
+    for (const [key, val] of Object.entries(validatedData)) {
+      if ((asset as any)[key] !== val && val !== undefined) {
+        changedFields[key] = { before: (asset as any)[key], after: val };
+      }
+    }
+
     const updated = await prisma.asset.update({
       where: { id },
       data: validatedData,
     });
 
+    // Record audit log with exact delta for change history tracking
     await prisma.auditLog.create({
       data: {
+        userId: (req as any).user?.id || null,
+        institutionId: asset.institutionId,
         action: 'ASSET_UPDATED',
         entityType: 'Asset',
         entityId: updated.id,
-        details: JSON.stringify(validatedData),
+        details: JSON.stringify({
+          changedFields,
+          updatedKeys: Object.keys(changedFields),
+        }),
+        ipAddress: req.ip || req.socket.remoteAddress || null,
       },
     });
 
@@ -266,10 +311,13 @@ export const deleteAsset = async (req: Request, res: Response) => {
 
     await prisma.auditLog.create({
       data: {
+        userId: (req as any).user?.id || null,
+        institutionId: asset.institutionId,
         action: 'ASSET_DELETED',
         entityType: 'Asset',
         entityId: id,
         details: JSON.stringify({ name: asset.name, identifier: asset.identifier }),
+        ipAddress: req.ip || req.socket.remoteAddress || null,
       },
     });
 
@@ -280,5 +328,42 @@ export const deleteAsset = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Failed to delete asset:', error);
     res.status(500).json({ success: false, message: 'Failed to delete asset', error: error.message });
+  }
+};
+
+export const getAssetHistory = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const asset = await prisma.asset.findUnique({ where: { id } });
+    if (!asset) {
+      return res.status(404).json({ success: false, message: 'Asset not found' });
+    }
+
+    const history = await prisma.auditLog.findMany({
+      where: {
+        entityType: 'Asset',
+        entityId: id,
+      },
+      orderBy: { timestamp: 'desc' },
+      include: {
+        user: {
+          select: { id: true, name: true, email: true, role: true },
+        },
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      data: history,
+      asset: {
+        id: asset.id,
+        name: asset.name,
+        identifier: asset.identifier,
+        informationSource: asset.informationSource,
+      },
+    });
+  } catch (error: any) {
+    console.error('Failed to get asset history:', error);
+    res.status(500).json({ success: false, message: 'Failed to retrieve asset history', error: error.message });
   }
 };

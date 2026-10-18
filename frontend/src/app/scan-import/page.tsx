@@ -198,15 +198,10 @@ export default function ScanAndImportPage() {
         formData.append('files', file);
       });
 
-      const response = await fetch('http://localhost:4000/api/v1/imports/preview', {
+      const data = await fetchApi<any>('/imports/preview', {
         method: 'POST',
         body: formData,
       });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to generate import preview');
-      }
 
       setPreviewData(data.data);
     } catch (err: any) {

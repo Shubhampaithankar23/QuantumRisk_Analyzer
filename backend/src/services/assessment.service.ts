@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import prisma from '../lib/prisma';
 
 export interface FindingEvaluation {
@@ -12,6 +13,7 @@ export interface FindingEvaluation {
   standardRef: string;
   confidence: 'HIGH' | 'MEDIUM' | 'NEEDS_VERIFICATION';
   limitations: string;
+  evidenceId?: string;
   recommendation: {
     recommendedAlgorithm: string;
     rationale: string;
@@ -78,10 +80,13 @@ export function evaluateAlgorithm(
   // 1. DIGITAL SIGNATURES
   if (
     purpose === 'DIGITAL_SIGNATURE' ||
-    algo.includes('RSA') ||
-    algo.includes('ECDSA') ||
-    algo.includes('ED25519') ||
-    algo.includes('DSA')
+    (!declaredPurpose &&
+      (algo.includes('RSA') ||
+        algo.includes('ECDSA') ||
+        algo.includes('ED25519') ||
+        algo.includes('DSA')) &&
+      !algo.includes('ECDH') &&
+      !algo.includes('KEY TRANSPORT'))
   ) {
     if (algo.includes('ML-DSA') || algo.includes('DILITHIUM')) {
       return {
@@ -152,10 +157,10 @@ export function evaluateAlgorithm(
       purpose: 'DIGITAL_SIGNATURE',
       riskLevel: isLegacy ? 'CRITICAL' : 'HIGH',
       riskReason:
-        'Vulnerable to polynomial-time factoring or discrete logarithm solving via Shor\'s algorithm on a Cryptanalytically Relevant Quantum Computer (CRQC). Digital signatures will become forgeable.',
+        'Vulnerable to polynomial-time factoring or discrete logarithm solving via Shor\'s algorithm on a Cryptanalytically Relevant Quantum Computer (CRQC). Under NIST IR 8547, classical signatures (RSA-2048, ECDSA-P256) are targeted for deprecation by 2030 and complete disallowance by 2035. Digital signatures will become forgeable.',
       evidenceSource,
       ruleId: isLegacy ? 'LEGACY-VULN-SIGNATURE' : 'NIST-PQC-VULN-SIG',
-      standardRef: 'NIST FIPS 204 / NIST SP 800-208',
+      standardRef: 'NIST FIPS 204 / NIST IR 8547 / NIST SP 800-208',
       confidence: evidenceSource === 'scanner_verified' ? 'HIGH' : 'MEDIUM',
       limitations:
         'Identifies quantum vulnerability of public key signature algorithm. Does not evaluate web server application security or TLS session data in transit.',
@@ -187,7 +192,8 @@ export function evaluateAlgorithm(
     algo.includes('DHE') ||
     algo.includes('X25519') ||
     algo.includes('P-256') ||
-    algo.includes('SECP')
+    algo.includes('SECP') ||
+    algo.includes('KEY TRANSPORT')
   ) {
     if (algo.includes('ML-KEM') || algo.includes('KYBER') || algo.includes('X25519MLKEM768')) {
       return {
@@ -216,7 +222,39 @@ export function evaluateAlgorithm(
       };
     }
 
-    // Classical key exchange: ECDHE, DHE, RSA key exchange
+    // Static RSA Key Transport (CRITICAL risk - no forward secrecy, vulnerable to Shor's algorithm and past traffic compromise)
+    if (algo.includes('KEY TRANSPORT') || (algo.includes('RSA') && purpose === 'KEY_ESTABLISHMENT')) {
+      return {
+        title: `Static RSA Key Transport (${rawAlgo})`,
+        algorithmOrConfig: rawAlgo,
+        observedValue,
+        purpose: 'KEY_ESTABLISHMENT',
+        riskLevel: 'CRITICAL',
+        riskReason:
+          'Static RSA key transport provides ZERO forward secrecy. Adversaries recording traffic can decrypt all historical communications retrospectively once private key is factored via Shor\'s algorithm.',
+        evidenceSource,
+        ruleId: 'NIST-SP800-52-STATIC-RSA-KEM',
+        standardRef: 'NIST SP 800-52 Rev 2 / NIST FIPS 203',
+        confidence: evidenceSource === 'scanner_verified' ? 'HIGH' : 'MEDIUM',
+        limitations: 'Static RSA key exchange observed in TLS cipher suites. Deprecated in modern TLS 1.3.',
+        recommendation: {
+          recommendedAlgorithm: 'ML-KEM-768 (NIST FIPS 203) / Hybrid X25519MLKEM768',
+          rationale:
+            'Replace obsolete static RSA key transport with lattice-based key encapsulation providing forward secrecy.',
+          whyAppropriate: 'Eliminates Store-Now-Decrypt-Later risk on session key establishment.',
+          compatibilityNotes: 'Upgrade endpoints to TLS 1.3 to remove static RSA cipher suites.',
+          migrationSteps: [
+            'Disable all TLS_RSA_* cipher suites in server configuration',
+            'Upgrade server to TLS 1.3',
+            'Deploy ML-KEM-768 hybrid key exchange',
+          ],
+          standardRef: 'NIST FIPS 203',
+          urgency: 'CRITICAL',
+        },
+      };
+    }
+
+    // Classical key exchange: ECDHE, DHE
     return {
       title: `Quantum-Vulnerable Key Establishment (${rawAlgo})`,
       algorithmOrConfig: rawAlgo,
@@ -393,7 +431,99 @@ export function evaluateAlgorithm(
     };
   }
 
-  // 5. UNKNOWN / INSUFFICIENT EVIDENCE - STRICT TRACEABILITY
+  // 5. PROTOCOL & TLS VERSIONS
+  if (purpose === 'PROTOCOL' || algo.includes('TLS') || algo.includes('SSL')) {
+    if (algo.includes('TLS 1.3') || algo.includes('TLSV1.3') || algo === 'TLS1.3') {
+      return {
+        title: `Modern TLS 1.3 Transport Protocol (${rawAlgo})`,
+        algorithmOrConfig: rawAlgo,
+        observedValue,
+        purpose: 'PROTOCOL',
+        riskLevel: 'LOW',
+        riskReason:
+          'TLS 1.3 provides essential modern cryptographic hygiene (mandatory forward secrecy, removal of broken ciphers). NOTE: TLS 1.3 is NOT automatically quantum-safe on its own; post-quantum safety strictly requires negotiating a post-quantum KEM group (FIPS 203) and post-quantum certificate signatures (FIPS 204).',
+        evidenceSource,
+        ruleId: 'IETF-RFC8446-TLS13',
+        standardRef: 'RFC 8446 / NIST IR 8547',
+        confidence: evidenceSource === 'scanner_verified' ? 'HIGH' : 'MEDIUM',
+        limitations:
+          'Protocol version evaluated. End-to-end post-quantum safety depends on key exchange group and signature algorithms negotiated over this protocol.',
+        recommendation: {
+          recommendedAlgorithm: 'Maintain TLS 1.3 with Hybrid Post-Quantum KEM Groups (X25519MLKEM768)',
+          rationale:
+            'TLS 1.3 provides the required protocol foundation to negotiate post-quantum hybrid key exchange groups (e.g. X25519MLKEM768).',
+          whyAppropriate: 'Industry standard for modern secure communications.',
+          compatibilityNotes: 'Supported by modern browsers and operating systems.',
+          migrationSteps: [
+            'Verify server TLS configuration enables TLS 1.3',
+            'Enable post-quantum hybrid key exchange groups (X25519MLKEM768)',
+          ],
+          standardRef: 'RFC 8446',
+          urgency: 'LOW',
+        },
+      };
+    }
+
+    if (algo.includes('TLS 1.2') || algo.includes('TLSV1.2') || algo === 'TLS1.2') {
+      return {
+        title: `Legacy TLS 1.2 Transport Protocol (${rawAlgo})`,
+        algorithmOrConfig: rawAlgo,
+        observedValue,
+        purpose: 'PROTOCOL',
+        riskLevel: 'MEDIUM',
+        riskReason:
+          'TLS 1.2 lacks native post-quantum hybrid group standardization and allows obsolete cryptographic options. Must upgrade to TLS 1.3 to enable post-quantum key encapsulation (ML-KEM).',
+        evidenceSource,
+        ruleId: 'NIST-SP800-52R2-TLS12',
+        standardRef: 'NIST SP 800-52 Rev 2',
+        confidence: evidenceSource === 'scanner_verified' ? 'HIGH' : 'MEDIUM',
+        limitations: 'TLS 1.2 is classical only and cannot natively support standard post-quantum hybrid groups.',
+        recommendation: {
+          recommendedAlgorithm: 'Upgrade to TLS 1.3',
+          rationale: 'TLS 1.3 is required for standard ML-KEM post-quantum key exchange groups.',
+          whyAppropriate: 'Mandated by NIST SP 800-52 Rev 2 for institutional security.',
+          compatibilityNotes: 'Supported by all modern software clients.',
+          migrationSteps: ['Enable TLS 1.3 on web servers and load balancers', 'Phase out TLS 1.2 support'],
+          standardRef: 'NIST SP 800-52 Rev 2',
+          urgency: 'MEDIUM',
+        },
+      };
+    }
+
+    if (
+      algo.includes('TLS 1.0') ||
+      algo.includes('TLS 1.1') ||
+      algo.includes('TLSV1.0') ||
+      algo.includes('TLSV1.1') ||
+      algo.includes('SSL')
+    ) {
+      return {
+        title: `Obsolete & Deprecated Protocol Version (${rawAlgo})`,
+        algorithmOrConfig: rawAlgo,
+        observedValue,
+        purpose: 'PROTOCOL',
+        riskLevel: 'CRITICAL',
+        riskReason:
+          'Formally deprecated by NIST SP 800-52 Rev 2 and IETF RFC 8996. Vulnerable to POODLE, BEAST, and classical cryptographic attacks.',
+        evidenceSource,
+        ruleId: 'IETF-RFC8996-LEGACY-TLS',
+        standardRef: 'IETF RFC 8996 / NIST SP 800-52 Rev 2',
+        confidence: evidenceSource === 'scanner_verified' ? 'HIGH' : 'MEDIUM',
+        limitations: 'Deprecated protocol versions must be disabled immediately.',
+        recommendation: {
+          recommendedAlgorithm: 'Disable Legacy Protocols Immediately & Upgrade to TLS 1.3',
+          rationale: 'Protocol versions prior to TLS 1.2 contain critical security flaws.',
+          whyAppropriate: 'Mandatory compliance with NIST and PCI-DSS standards.',
+          compatibilityNotes: 'Clients requiring SSL/TLS 1.0/1.1 are obsolete and insecure.',
+          migrationSteps: ['Disable TLS 1.0 and 1.1 in web server configs', 'Enforce TLS 1.3 minimum where feasible'],
+          standardRef: 'IETF RFC 8996',
+          urgency: 'CRITICAL',
+        },
+      };
+    }
+  }
+
+  // 6. UNKNOWN / INSUFFICIENT EVIDENCE - STRICT TRACEABILITY
   return {
     title: `Unverified Cryptographic Configuration (${rawAlgo || 'Unknown'})`,
     algorithmOrConfig: rawAlgo || 'Unknown',
@@ -457,8 +587,12 @@ export async function runAssessmentForAsset(assetId: string): Promise<Assessment
         where: { status: 'COMPLETED' },
         orderBy: { completedAt: 'desc' },
         take: 1,
-        include: { results: true },
+        include: {
+          results: true,
+          evidence: true,
+        },
       },
+      evidence: true,
     },
   });
 
@@ -476,9 +610,10 @@ export async function runAssessmentForAsset(assetId: string): Promise<Assessment
     // Certificate public key
     if (scanResult.certPubKeyAlgo && scanResult.certPubKeyAlgo !== 'Unknown') {
       const algoStr = `${scanResult.certPubKeyAlgo}${scanResult.certKeySize ? `-${scanResult.certKeySize}` : ''}`;
-      findingsToCreate.push(
-        evaluateAlgorithm(algoStr, 'DIGITAL_SIGNATURE', 'scanner_verified')
-      );
+      const evalItem = evaluateAlgorithm(algoStr, 'DIGITAL_SIGNATURE', 'scanner_verified');
+      const matchedEv = latestScan?.evidence?.find((e) => e.observedProperty === 'cert_pub_key_algo');
+      if (matchedEv) evalItem.evidenceId = matchedEv.id;
+      findingsToCreate.push(evalItem);
     } else {
       findingsToCreate.push(
         evaluateAlgorithm('Unknown Certificate Key Algorithm', 'DIGITAL_SIGNATURE', 'scanner_verified')
@@ -487,9 +622,10 @@ export async function runAssessmentForAsset(assetId: string): Promise<Assessment
 
     // Key exchange mechanism
     if (scanResult.keyExchangeGroup && scanResult.keyExchangeGroup !== 'Unknown Key Exchange') {
-      findingsToCreate.push(
-        evaluateAlgorithm(scanResult.keyExchangeGroup, 'KEY_ESTABLISHMENT', 'scanner_verified')
-      );
+      const evalItem = evaluateAlgorithm(scanResult.keyExchangeGroup, 'KEY_ESTABLISHMENT', 'scanner_verified');
+      const matchedEv = latestScan?.evidence?.find((e) => e.observedProperty === 'key_exchange_group');
+      if (matchedEv) evalItem.evidenceId = matchedEv.id;
+      findingsToCreate.push(evalItem);
     } else {
       findingsToCreate.push(
         evaluateAlgorithm('Unknown Key Exchange Mechanism', 'KEY_ESTABLISHMENT', 'scanner_verified')
@@ -498,9 +634,10 @@ export async function runAssessmentForAsset(assetId: string): Promise<Assessment
 
     // Cipher suite
     if (scanResult.cipherSuiteNegotiated) {
-      findingsToCreate.push(
-        evaluateAlgorithm(scanResult.cipherSuiteNegotiated, 'SYMMETRIC_ENCRYPTION', 'scanner_verified')
-      );
+      const evalItem = evaluateAlgorithm(scanResult.cipherSuiteNegotiated, 'SYMMETRIC_ENCRYPTION', 'scanner_verified');
+      const matchedEv = latestScan?.evidence?.find((e) => e.observedProperty === 'cipher_suite_negotiated');
+      if (matchedEv) evalItem.evidenceId = matchedEv.id;
+      findingsToCreate.push(evalItem);
     }
   }
 
@@ -542,6 +679,49 @@ export async function runAssessmentForAsset(assetId: string): Promise<Assessment
     );
   }
 
+  // Ensure every finding has an evidenceId backed by a database Evidence record
+  for (const item of findingsToCreate) {
+    if (!item.evidenceId) {
+      const existingEv = asset.evidence?.find(
+        (e) =>
+          e.observedValue === (item.observedValue || item.algorithmOrConfig) &&
+          e.evidenceSource === item.evidenceSource
+      );
+      if (existingEv) {
+        item.evidenceId = existingEv.id;
+      } else {
+        const newEv = await prisma.evidence.create({
+          data: {
+            assetId: asset.id,
+            scanJobId: latestScan?.id || null,
+            evidenceSource: item.evidenceSource,
+            evidenceType:
+              item.purpose === 'DIGITAL_SIGNATURE'
+                ? 'X509_CERTIFICATE'
+                : item.purpose === 'KEY_ESTABLISHMENT'
+                ? 'KEY_EXCHANGE'
+                : item.purpose === 'SYMMETRIC_ENCRYPTION'
+                ? 'CIPHER_SUITE'
+                : item.purpose === 'PROTOCOL'
+                ? 'TLS_HANDSHAKE'
+                : 'INVENTORY_RECORD',
+            observedProperty: item.purpose ? item.purpose.toLowerCase() : 'algorithm',
+            observedValue: item.observedValue || item.algorithmOrConfig,
+            rawPayload: JSON.stringify({
+              algorithm: item.algorithmOrConfig,
+              purpose: item.purpose,
+              source: item.evidenceSource,
+            }),
+            scannerVersion: item.evidenceSource === 'scanner_verified' ? (scanResult?.scannerVersion || 'Node-TLS') : null,
+            verifiedAt: item.evidenceSource === 'scanner_verified' ? new Date() : null,
+            hashDigest: crypto.createHash('sha256').update(item.algorithmOrConfig).digest('hex'),
+          },
+        });
+        item.evidenceId = newEv.id;
+      }
+    }
+  }
+
   // Calculate deterministic score with explicit breakdown
   const contributingFindings: Array<{
     title: string;
@@ -549,6 +729,7 @@ export async function runAssessmentForAsset(assetId: string): Promise<Assessment
     riskLevel: string;
     pointsAdded: number;
     ruleId: string;
+    evidenceId?: string;
   }> = [];
 
   let rawScore = 0;
@@ -565,6 +746,7 @@ export async function runAssessmentForAsset(assetId: string): Promise<Assessment
         riskLevel: f.riskLevel,
         pointsAdded: 0,
         ruleId: f.ruleId,
+        evidenceId: f.evidenceId,
       });
       continue;
     }
@@ -591,6 +773,7 @@ export async function runAssessmentForAsset(assetId: string): Promise<Assessment
       riskLevel: f.riskLevel,
       pointsAdded: points,
       ruleId: f.ruleId,
+      evidenceId: f.evidenceId,
     });
   }
 
@@ -663,6 +846,7 @@ export async function runAssessmentForAsset(assetId: string): Promise<Assessment
       data: {
         assessmentId: createdAssessment.id,
         assetId: asset.id,
+        evidenceId: item.evidenceId,
         title: item.title,
         algorithmOrConfig: item.algorithmOrConfig,
         observedValue: item.observedValue,

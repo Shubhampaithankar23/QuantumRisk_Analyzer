@@ -56,8 +56,10 @@ export default function AssetsPage() {
   const [editingAsset, setEditingAsset] = useState<AssetRecord | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [viewAsset, setViewAsset] = useState<AssetRecord | null>(null);
+  const [assetHistory, setAssetHistory] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
-  // Form state
+  // Form state with explicit cryptographic dropdowns supporting 'Unknown'
   const [formData, setFormData] = useState({
     name: '',
     identifier: '',
@@ -67,6 +69,10 @@ export default function AssetsPage() {
     tlsVersion: 'TLSv1.3',
     port: 443,
     environment: 'PRODUCTION',
+    certPubKeyAlgo: 'Unknown',
+    certKeySize: 'Unknown',
+    keyExchangeGroup: 'Unknown',
+    cipherSuite: 'Unknown',
     notes: '',
   });
   const [submitting, setSubmitting] = useState(false);
@@ -110,6 +116,10 @@ export default function AssetsPage() {
       tlsVersion: 'TLSv1.3',
       port: 443,
       environment: 'PRODUCTION',
+      certPubKeyAlgo: 'Unknown',
+      certKeySize: 'Unknown',
+      keyExchangeGroup: 'Unknown',
+      cipherSuite: 'Unknown',
       notes: '',
     });
     setFormError(null);
@@ -127,10 +137,30 @@ export default function AssetsPage() {
       tlsVersion: asset.tlsVersion || 'TLSv1.3',
       port: asset.port,
       environment: asset.environment,
+      certPubKeyAlgo: 'Unknown',
+      certKeySize: 'Unknown',
+      keyExchangeGroup: 'Unknown',
+      cipherSuite: 'Unknown',
       notes: asset.notes || '',
     });
     setFormError(null);
     setShowAddModal(true);
+  };
+
+  const handleViewAsset = async (asset: AssetRecord) => {
+    setViewAsset(asset);
+    setAssetHistory([]);
+    setLoadingHistory(true);
+    try {
+      const res = await fetchApi<any>(`/assets/${asset.id}/history`);
+      if (res.success) {
+        setAssetHistory(res.data || []);
+      }
+    } catch (err) {
+      console.error('Failed to load asset history:', err);
+    } finally {
+      setLoadingHistory(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -139,15 +169,56 @@ export default function AssetsPage() {
     setFormError(null);
 
     try {
+      // Build known algorithms inventory array from form inputs if specified
+      const algos: Array<{ algorithm: string; purpose: string }> = [];
+      if (formData.certPubKeyAlgo !== 'Unknown') {
+        const keySize = formData.certKeySize !== 'Unknown' ? `-${formData.certKeySize}` : '';
+        algos.push({
+          algorithm: `${formData.certPubKeyAlgo}${keySize}`,
+          purpose: 'DIGITAL_SIGNATURE',
+        });
+      }
+      if (formData.keyExchangeGroup !== 'Unknown') {
+        algos.push({
+          algorithm: formData.keyExchangeGroup,
+          purpose: 'KEY_ESTABLISHMENT',
+        });
+      }
+      if (formData.cipherSuite !== 'Unknown') {
+        algos.push({
+          algorithm: formData.cipherSuite,
+          purpose: 'SYMMETRIC_ENCRYPTION',
+        });
+      }
+      if (formData.knownAlgorithms && formData.knownAlgorithms.trim() !== '') {
+        const extra = formData.knownAlgorithms.split(',').map((s) => s.trim()).filter(Boolean);
+        for (const item of extra) {
+          algos.push({ algorithm: item, purpose: 'UNKNOWN' });
+        }
+      }
+
+      const payload = {
+        name: formData.name,
+        identifier: formData.identifier || undefined,
+        assetType: formData.assetType,
+        dataSensitivity: formData.dataSensitivity,
+        tlsVersion: formData.tlsVersion !== 'Unknown' ? formData.tlsVersion : undefined,
+        port: formData.port,
+        environment: formData.environment,
+        knownAlgorithms: algos.length > 0 ? JSON.stringify(algos) : (formData.knownAlgorithms || undefined),
+        informationSource: 'MANUAL',
+        notes: formData.notes,
+      };
+
       if (editingAsset) {
         await fetchApi(`/assets/${editingAsset.id}`, {
           method: 'PUT',
-          body: JSON.stringify(formData),
+          body: JSON.stringify(payload),
         });
       } else {
         await fetchApi('/assets', {
           method: 'POST',
-          body: JSON.stringify(formData),
+          body: JSON.stringify(payload),
         });
       }
       setShowAddModal(false);
@@ -346,9 +417,9 @@ export default function AssetsPage() {
                         <td className="py-3 px-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
                             <button
-                              onClick={() => setViewAsset(asset)}
+                              onClick={() => handleViewAsset(asset)}
                               className="p-1.5 text-slate-500 hover:text-slate-800 rounded hover:bg-slate-100"
-                              title="View Asset Details"
+                              title="View Asset Details & Edit History"
                             >
                               <Info className="w-3.5 h-3.5" />
                             </button>
@@ -381,11 +452,16 @@ export default function AssetsPage() {
       {/* Add / Edit Asset Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full p-6 border border-slate-200 relative max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-xl w-full p-6 border border-slate-200 relative max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-              <h3 className="font-semibold text-slate-900 text-sm">
-                {editingAsset ? 'Edit Asset Record' : 'Register New Institutional Asset'}
-              </h3>
+              <div>
+                <h3 className="font-semibold text-slate-900 text-sm">
+                  {editingAsset ? 'Edit Institutional Asset' : 'Register New Institutional Asset'}
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  Manual inventory entry — stored as <span className="font-semibold text-slate-700">user_reported (unverified)</span>.
+                </p>
+              </div>
               <button
                 onClick={() => {
                   setShowAddModal(false);
@@ -397,6 +473,14 @@ export default function AssetsPage() {
               </button>
             </div>
 
+            {/* Provenance Banner */}
+            <div className="mt-3 p-2.5 rounded bg-amber-50 border border-amber-200 text-amber-800 text-[11px] flex items-start gap-2">
+              <Info className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" />
+              <div>
+                <strong>Manual Entry Policy:</strong> Cryptographic configuration entered here is tagged as <em>user_reported</em> and will not be claimed as independently scanner-verified. Only asset name and type are required.
+              </div>
+            </div>
+
             {formError && (
               <div className="mt-3 p-3 rounded bg-red-50 border border-red-200 text-red-700 text-xs">
                 {formError}
@@ -404,120 +488,218 @@ export default function AssetsPage() {
             )}
 
             <form onSubmit={handleSubmit} className="mt-4 space-y-4 text-xs">
-              <div>
-                <label className="block font-medium text-slate-700 mb-1">Asset Name *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Student Identity Provider"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-3 py-2 rounded border border-slate-200 focus:outline-none focus:ring-1 focus:ring-navy-900"
-                />
-              </div>
-
-              <div>
-                <label className="block font-medium text-slate-700 mb-1">
-                  Hostname or System Identifier *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. idp.university.edu"
-                  value={formData.identifier}
-                  onChange={(e) => setFormData({ ...formData, identifier: e.target.value })}
-                  className="w-full px-3 py-2 rounded border border-slate-200 focus:outline-none focus:ring-1 focus:ring-navy-900 font-mono"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-medium text-slate-700 mb-1">Asset Type *</label>
-                  <select
-                    value={formData.assetType}
-                    onChange={(e) => setFormData({ ...formData, assetType: e.target.value })}
-                    className="w-full px-3 py-2 rounded border border-slate-200 focus:outline-none focus:ring-1 focus:ring-navy-900 bg-white"
-                  >
-                    <option value="WEBSITE">Website</option>
-                    <option value="SERVER">Server</option>
-                    <option value="APPLICATION">Application</option>
-                    <option value="DATABASE">Database</option>
-                    <option value="DIGITAL_CERTIFICATE">Digital Certificate</option>
-                    <option value="STORAGE_BACKUP">Storage & Backup</option>
-                  </select>
-                </div>
+              {/* Section 1: Core Asset Info */}
+              <div className="space-y-3 pb-3 border-b border-slate-100">
+                <span className="font-semibold text-slate-800 text-[11px] uppercase tracking-wider block">
+                  1. Core Asset Details
+                </span>
 
                 <div>
-                  <label className="block font-medium text-slate-700 mb-1">Data Sensitivity *</label>
-                  <select
-                    value={formData.dataSensitivity}
-                    onChange={(e) => setFormData({ ...formData, dataSensitivity: e.target.value })}
-                    className="w-full px-3 py-2 rounded border border-slate-200 focus:outline-none focus:ring-1 focus:ring-navy-900 bg-white"
-                  >
-                    <option value="PUBLIC">Public</option>
-                    <option value="INTERNAL">Internal</option>
-                    <option value="CONFIDENTIAL">Confidential</option>
-                    <option value="HIGHLY_SENSITIVE">Highly Sensitive</option>
-                    <option value="REGULATED">Regulated (FERPA/HIPAA)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block font-medium text-slate-700 mb-1">TLS Version</label>
+                  <label className="block font-medium text-slate-700 mb-1">Asset Name *</label>
                   <input
                     type="text"
-                    placeholder="TLSv1.3"
-                    value={formData.tlsVersion}
-                    onChange={(e) => setFormData({ ...formData, tlsVersion: e.target.value })}
-                    className="w-full px-3 py-2 rounded border border-slate-200 font-mono"
+                    required
+                    placeholder="e.g. Student Identity Gateway"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className="w-full px-3 py-2 rounded border border-slate-200 focus:outline-none focus:ring-1 focus:ring-navy-900"
                   />
                 </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-medium text-slate-700 mb-1">
+                      System Identifier / Hostname (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. idp.university.edu (auto-generated if empty)"
+                      value={formData.identifier}
+                      onChange={(e) => setFormData({ ...formData, identifier: e.target.value })}
+                      className="w-full px-3 py-2 rounded border border-slate-200 focus:outline-none focus:ring-1 focus:ring-navy-900 font-mono text-[11px]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-medium text-slate-700 mb-1">Asset Type *</label>
+                    <select
+                      value={formData.assetType}
+                      onChange={(e) => setFormData({ ...formData, assetType: e.target.value })}
+                      className="w-full px-3 py-2 rounded border border-slate-200 focus:outline-none focus:ring-1 focus:ring-navy-900 bg-white"
+                    >
+                      <option value="WEBSITE">Website</option>
+                      <option value="SERVER">Server</option>
+                      <option value="APPLICATION">Application</option>
+                      <option value="DATABASE">Database</option>
+                      <option value="DIGITAL_CERTIFICATE">Digital Certificate</option>
+                      <option value="STORAGE_BACKUP">Storage & Backup</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-medium text-slate-700 mb-1">Data Sensitivity</label>
+                    <select
+                      value={formData.dataSensitivity}
+                      onChange={(e) => setFormData({ ...formData, dataSensitivity: e.target.value })}
+                      className="w-full px-3 py-2 rounded border border-slate-200 focus:outline-none focus:ring-1 focus:ring-navy-900 bg-white"
+                    >
+                      <option value="PUBLIC">Public</option>
+                      <option value="INTERNAL">Internal</option>
+                      <option value="CONFIDENTIAL">Confidential</option>
+                      <option value="HIGHLY_SENSITIVE">Highly Sensitive</option>
+                      <option value="REGULATED">Regulated (FERPA/HIPAA)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-medium text-slate-700 mb-1">Environment</label>
+                    <select
+                      value={formData.environment}
+                      onChange={(e) => setFormData({ ...formData, environment: e.target.value })}
+                      className="w-full px-3 py-2 rounded border border-slate-200 bg-white"
+                    >
+                      <option value="PRODUCTION">Production</option>
+                      <option value="STAGING">Staging</option>
+                      <option value="DEVELOPMENT">Development</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 2: TLS & Certificate Configuration */}
+              <div className="space-y-3 pb-3 border-b border-slate-100">
+                <span className="font-semibold text-slate-800 text-[11px] uppercase tracking-wider block">
+                  2. TLS & Certificate Configuration (Optional)
+                </span>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-medium text-slate-700 mb-1">TLS Protocol Version</label>
+                    <select
+                      value={formData.tlsVersion}
+                      onChange={(e) => setFormData({ ...formData, tlsVersion: e.target.value })}
+                      className="w-full px-3 py-2 rounded border border-slate-200 bg-white font-mono text-[11px]"
+                    >
+                      <option value="Unknown">Unknown / Not Observed</option>
+                      <option value="TLSv1.3">TLSv1.3 (Modern)</option>
+                      <option value="TLSv1.2">TLSv1.2 (Legacy)</option>
+                      <option value="TLSv1.1">TLSv1.1 (Deprecated)</option>
+                      <option value="TLSv1.0">TLSv1.0 (Deprecated)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-medium text-slate-700 mb-1">Port</label>
+                    <input
+                      type="number"
+                      value={formData.port}
+                      onChange={(e) => setFormData({ ...formData, port: parseInt(e.target.value, 10) || 443 })}
+                      className="w-full px-3 py-2 rounded border border-slate-200 font-mono text-[11px]"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-medium text-slate-700 mb-1">Certificate Public Key Algorithm</label>
+                    <select
+                      value={formData.certPubKeyAlgo}
+                      onChange={(e) => setFormData({ ...formData, certPubKeyAlgo: e.target.value })}
+                      className="w-full px-3 py-2 rounded border border-slate-200 bg-white font-mono text-[11px]"
+                    >
+                      <option value="Unknown">Unknown / Not Observed</option>
+                      <option value="RSA">RSA (Classical Vulnerable)</option>
+                      <option value="ECDSA">ECDSA (Classical Vulnerable)</option>
+                      <option value="Ed25519">Ed25519 (Classical Edwards Curve)</option>
+                      <option value="ML-DSA-65">ML-DSA-65 (NIST FIPS 204 Post-Quantum)</option>
+                      <option value="SLH-DSA">SLH-DSA (NIST FIPS 205 Stateless Hash)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-medium text-slate-700 mb-1">Certificate Key Size</label>
+                    <select
+                      value={formData.certKeySize}
+                      onChange={(e) => setFormData({ ...formData, certKeySize: e.target.value })}
+                      className="w-full px-3 py-2 rounded border border-slate-200 bg-white font-mono text-[11px]"
+                    >
+                      <option value="Unknown">Unknown / Not Observed</option>
+                      <option value="2048">2048 bits (RSA / DH)</option>
+                      <option value="3072">3072 bits (RSA / DH)</option>
+                      <option value="4096">4096 bits (RSA / DH)</option>
+                      <option value="256">256 bits (P-256 / secp256r1)</option>
+                      <option value="384">384 bits (P-384 / secp384r1)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 3: Key Exchange & Symmetric Inventory */}
+              <div className="space-y-3 pb-3 border-b border-slate-100">
+                <span className="font-semibold text-slate-800 text-[11px] uppercase tracking-wider block">
+                  3. Key Exchange & Symmetric Cipher (Optional)
+                </span>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-medium text-slate-700 mb-1">Key Exchange Mechanism</label>
+                    <select
+                      value={formData.keyExchangeGroup}
+                      onChange={(e) => setFormData({ ...formData, keyExchangeGroup: e.target.value })}
+                      className="w-full px-3 py-2 rounded border border-slate-200 bg-white font-mono text-[11px]"
+                    >
+                      <option value="Unknown">Unknown / Not Observed</option>
+                      <option value="X25519MLKEM768">X25519MLKEM768 (Hybrid Post-Quantum FIPS 203)</option>
+                      <option value="ML-KEM-768">ML-KEM-768 (Pure Post-Quantum FIPS 203)</option>
+                      <option value="ECDHE-X25519">ECDHE-X25519 (Classical Elliptic Curve)</option>
+                      <option value="ECDHE-P256">ECDHE-P256 (Classical NIST Curve)</option>
+                      <option value="Static RSA Key Transport">Static RSA Key Transport (Deprecated, No PFS)</option>
+                      <option value="DHE">DHE (Classical Finite Field DH)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-medium text-slate-700 mb-1">Symmetric Cipher Suite</label>
+                    <select
+                      value={formData.cipherSuite}
+                      onChange={(e) => setFormData({ ...formData, cipherSuite: e.target.value })}
+                      className="w-full px-3 py-2 rounded border border-slate-200 bg-white font-mono text-[11px]"
+                    >
+                      <option value="Unknown">Unknown / Not Observed</option>
+                      <option value="AES-256-GCM">AES-256-GCM (Quantum Resistant, 128-bit Grover)</option>
+                      <option value="CHACHA20-POLY1305">ChaCha20-Poly1305 (Quantum Resistant)</option>
+                      <option value="AES-128-GCM">AES-128-GCM (Reduced 64-bit Grover Margin)</option>
+                      <option value="3DES-EDE-CBC">3DES-EDE-CBC (Broken)</option>
+                      <option value="RC4-128">RC4-128 (Broken)</option>
+                    </select>
+                  </div>
+                </div>
+
                 <div>
-                  <label className="block font-medium text-slate-700 mb-1">Port</label>
+                  <label className="block font-medium text-slate-700 mb-1">
+                    Additional Cryptographic Primitives (Comma separated or notes)
+                  </label>
                   <input
-                    type="number"
-                    value={formData.port}
-                    onChange={(e) => setFormData({ ...formData, port: parseInt(e.target.value, 10) || 443 })}
-                    className="w-full px-3 py-2 rounded border border-slate-200 font-mono"
+                    type="text"
+                    placeholder="e.g. SHA-384, AES-256-CBC, Ed25519"
+                    value={formData.knownAlgorithms}
+                    onChange={(e) => setFormData({ ...formData, knownAlgorithms: e.target.value })}
+                    className="w-full px-3 py-2 rounded border border-slate-200 font-mono text-[11px]"
                   />
                 </div>
-                <div>
-                  <label className="block font-medium text-slate-700 mb-1">Environment</label>
-                  <select
-                    value={formData.environment}
-                    onChange={(e) => setFormData({ ...formData, environment: e.target.value })}
-                    className="w-full px-3 py-2 rounded border border-slate-200 bg-white"
-                  >
-                    <option value="PRODUCTION">Production</option>
-                    <option value="STAGING">Staging</option>
-                    <option value="DEVELOPMENT">Development</option>
-                  </select>
-                </div>
               </div>
 
-              <div>
-                <label className="block font-medium text-slate-700 mb-1">
-                  Reported / Known Cryptographic Algorithms
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. RSA-2048, ECDHE-P256, AES-256-GCM"
-                  value={formData.knownAlgorithms}
-                  onChange={(e) => setFormData({ ...formData, knownAlgorithms: e.target.value })}
-                  className="w-full px-3 py-2 rounded border border-slate-200 font-mono"
-                />
-              </div>
-
+              {/* Section 4: Operational Notes */}
               <div>
                 <label className="block font-medium text-slate-700 mb-1">Operational Notes</label>
                 <textarea
-                  rows={3}
-                  placeholder="Context, dependencies, responsible team..."
+                  rows={2}
+                  placeholder="System owner, research project context, dependencies..."
                   value={formData.notes}
                   onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  className="w-full px-3 py-2 rounded border border-slate-200"
+                  className="w-full px-3 py-2 rounded border border-slate-200 text-xs"
                 />
               </div>
 
@@ -537,7 +719,7 @@ export default function AssetsPage() {
                   disabled={submitting}
                   className="px-4 py-2 bg-navy-900 hover:bg-navy-850 text-white font-medium rounded shadow-sm disabled:opacity-50"
                 >
-                  {submitting ? 'Saving...' : editingAsset ? 'Save Changes' : 'Register Asset'}
+                  {submitting ? 'Saving...' : editingAsset ? 'Save Changes' : 'Register Asset (Manual)'}
                 </button>
               </div>
             </form>
@@ -575,10 +757,10 @@ export default function AssetsPage() {
         </div>
       )}
 
-      {/* View Asset Detail Drawer / Modal */}
+      {/* View Asset Detail Drawer / Modal with Edit History */}
       {viewAsset && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-xl w-full p-6 border border-slate-200 max-h-[85vh] overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 border border-slate-200 max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
               <div>
                 <h3 className="font-semibold text-slate-900 text-sm">{viewAsset.name}</h3>
@@ -604,15 +786,23 @@ export default function AssetsPage() {
                   <span className="font-medium text-slate-800">{viewAsset.environment}</span>
                 </div>
                 <div>
-                  <span className="text-slate-400 block text-[11px]">Evidence Source</span>
-                  <span className="font-medium text-slate-800">{viewAsset.informationSource}</span>
+                  <span className="text-slate-400 block text-[11px]">Evidence Provenance</span>
+                  <span className="font-medium text-slate-800">
+                    {viewAsset.informationSource === 'MANUAL' ? (
+                      <span className="text-amber-700 font-semibold">Manual Entry (Unverified)</span>
+                    ) : viewAsset.informationSource.startsWith('IMPORT') ? (
+                      <span className="text-blue-700 font-semibold">Imported Inventory (Unverified)</span>
+                    ) : (
+                      <span className="text-emerald-700 font-semibold">Verified TLS Scan</span>
+                    )}
+                  </span>
                 </div>
               </div>
 
               <div>
                 <span className="text-slate-500 block font-medium mb-1">Cryptographic Profile</span>
-                <div className="p-3 bg-slate-900 text-slate-200 font-mono text-[11px] rounded">
-                  {viewAsset.knownAlgorithms || 'No known algorithms logged.'}
+                <div className="p-3 bg-slate-900 text-slate-200 font-mono text-[11px] rounded break-all whitespace-pre-wrap">
+                  {viewAsset.knownAlgorithms || 'No cryptographic primitives recorded.'}
                 </div>
               </div>
 
@@ -624,6 +814,69 @@ export default function AssetsPage() {
                   </p>
                 </div>
               )}
+
+              {/* Edit History & Audit Trail */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-slate-700 font-semibold text-[11px] uppercase tracking-wider">
+                    Change History & Audit Trail
+                  </span>
+                  <span className="text-slate-400 text-[10px]">
+                    {assetHistory.length} audit event(s) recorded
+                  </span>
+                </div>
+
+                {loadingHistory ? (
+                  <div className="p-3 text-center text-slate-400 text-xs">Loading audit history...</div>
+                ) : assetHistory.length === 0 ? (
+                  <div className="p-3 rounded bg-slate-50 border border-slate-200 text-slate-500 text-xs">
+                    No change history logged for this asset yet.
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                    {assetHistory.map((entry) => {
+                      let detailsObj: any = null;
+                      try {
+                        detailsObj = entry.details ? JSON.parse(entry.details) : null;
+                      } catch {
+                        detailsObj = entry.details;
+                      }
+
+                      return (
+                        <div
+                          key={entry.id}
+                          className="p-2.5 rounded bg-slate-50 border border-slate-200 text-[11px] space-y-1"
+                        >
+                          <div className="flex items-center justify-between text-slate-600">
+                            <span className="font-semibold text-slate-800">
+                              {entry.action.replace(/_/g, ' ')}
+                            </span>
+                            <span className="text-slate-400 font-mono text-[10px]">
+                              {formatDate(entry.timestamp)}
+                            </span>
+                          </div>
+                          {entry.user && (
+                            <div className="text-slate-500 text-[10px]">
+                              Actor: <span className="font-medium text-slate-700">{entry.user.name || entry.user.email}</span> ({entry.user.role})
+                            </div>
+                          )}
+                          {detailsObj?.changedFields && (
+                            <div className="mt-1 font-mono text-[10px] text-slate-600 bg-white p-1.5 rounded border border-slate-200">
+                              {Object.entries(detailsObj.changedFields).map(([field, delta]: [string, any]) => (
+                                <div key={field}>
+                                  <span className="font-semibold text-slate-700">{field}:</span>{' '}
+                                  <span className="text-red-500">{String(delta.before ?? 'none')}</span> &rarr;{' '}
+                                  <span className="text-emerald-600">{String(delta.after ?? 'none')}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
 
               <div className="pt-2 text-slate-400 text-[11px] flex justify-between border-t border-slate-100">
                 <span>Created: {formatDate(viewAsset.createdAt)}</span>

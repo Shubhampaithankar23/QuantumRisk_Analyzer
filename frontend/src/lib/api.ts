@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
 
 export function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -38,8 +38,9 @@ export async function fetchApi<T>(endpoint: string, options?: RequestInit): Prom
   const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
   const token = getAuthToken();
 
+  const isFormData = typeof FormData !== 'undefined' && options?.body instanceof FormData;
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(options?.headers as Record<string, string>),
   };
@@ -75,6 +76,45 @@ export interface DashboardStats {
     medium: number;
     low: number;
   };
+  sourceDistribution: {
+    liveScanned: number;
+    manual: number;
+    imported: number;
+  };
+  evidenceStats: {
+    scannerVerified: number;
+    userReported: number;
+    imported: number;
+    inferred: number;
+  };
+  remediationStats: {
+    open: number;
+    inProgress: number;
+    resolved: number;
+    acceptedRisk: number;
+    total: number;
+    progressPct: number;
+  };
+  scanStats: {
+    total: number;
+    queued: number;
+    running: number;
+    completed: number;
+    failed: number;
+  };
+  missingInfo: {
+    count: number;
+    assets: Array<{
+      id: string;
+      name: string;
+      identifier: string;
+      assetType: string;
+      informationSource: string;
+      assessmentStatus: string;
+      tlsVersion?: string | null;
+    }>;
+  };
+  inconclusiveCount: number;
   recentScans: Array<{
     id: string;
     targetHost: string;
@@ -83,6 +123,8 @@ export interface DashboardStats {
     tlsVersionNegotiated?: string;
     certPubKeyAlgo?: string;
     certKeySize?: number;
+    checksCount?: number;
+    evidenceCount?: number;
     completedAt?: string;
     createdAt: string;
   }>;

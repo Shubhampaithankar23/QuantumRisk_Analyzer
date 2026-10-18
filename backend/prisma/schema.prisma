@@ -12,11 +12,12 @@ model Institution {
   name         String
   domain       String
   contactEmail String?
-  type         String      @default("UNIVERSITY") // UNIVERSITY, COLLEGE, RESEARCH_INSTITUTION, OTHER
+  type         String      @default("UNIVERSITY") // UNIVERSITY, COLLEGE, RESEARCH_INSTITUTION, ENTERPRISE, OTHER
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
   users        User[]
   assets       Asset[]
+  scanJobs     ScanJob[]
   importJobs   ImportJob[]
   auditLogs    AuditLog[]
 }
@@ -55,15 +56,18 @@ model Asset {
   scanJobs          ScanJob[]
   assessments       Assessment[]
   findings          Finding[]
+  evidence          Evidence[]
 }
 
 model ScanJob {
   id                     String       @id @default(cuid())
+  institutionId          String?
+  institution            Institution? @relation(fields: [institutionId], references: [id], onDelete: SetNull)
   assetId                String?
   asset                  Asset?       @relation(fields: [assetId], references: [id], onDelete: SetNull)
   targetHost             String
   port                   Int          @default(443)
-  status                 String       @default("PENDING") // PENDING, RUNNING, COMPLETED, FAILED, REJECTED
+  status                 String       @default("QUEUED") // QUEUED, RUNNING, COMPLETED, FAILED, REJECTED
   scanType               String       @default("TLS_INSPECTION")
   authorizationConfirmed Boolean      @default(false)
   authorizedBy           String?
@@ -75,7 +79,44 @@ model ScanJob {
   startedAt              DateTime?
   completedAt            DateTime?
   createdAt              DateTime     @default(now())
-  results                ScanResult[]
+  updatedAt              DateTime     @default(now()) @updatedAt
+  checks                 ScanCheck[]
+  evidence               Evidence[]
+  results                ScanResult[] // Preserved for backwards compatibility
+}
+
+model ScanCheck {
+  id           String     @id @default(cuid())
+  scanJobId    String
+  scanJob      ScanJob    @relation(fields: [scanJobId], references: [id], onDelete: Cascade)
+  checkName    String     // TLS_VERSIONS, CIPHER_SUITES, CERTIFICATE_CHAIN, KEY_EXCHANGE_GROUPS
+  checkType    String     @default("TLS") // TLS, X509, CRYPTO
+  status       String     @default("SUCCESS") // SUCCESS, FAILED, TIMEOUT, NOT_SUPPORTED
+  observedData String?    // Structured JSON result of the check
+  errorMessage String?
+  durationMs   Int?
+  createdAt    DateTime   @default(now())
+  evidence     Evidence[]
+}
+
+model Evidence {
+  id               String      @id @default(cuid())
+  assetId          String?
+  asset            Asset?      @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  scanJobId        String?
+  scanJob          ScanJob?    @relation(fields: [scanJobId], references: [id], onDelete: SetNull)
+  scanCheckId      String?
+  scanCheck        ScanCheck?  @relation(fields: [scanCheckId], references: [id], onDelete: SetNull)
+  evidenceSource   String      @default("scanner_verified") // scanner_verified, imported, user_reported, inferred
+  evidenceType     String      // TLS_HANDSHAKE, X509_CERTIFICATE, CIPHER_SUITE, KEY_EXCHANGE, INVENTORY_RECORD, MANUAL_INPUT
+  observedProperty String      // cert_pub_key_algo, negotiated_tls_version, supported_curves, etc.
+  observedValue    String      // RSA-2048, TLSv1.3, X25519, etc.
+  rawPayload       String?     // JSON representation of raw scanner/imported payload
+  scannerVersion   String?
+  verifiedAt       DateTime?
+  hashDigest       String?     // SHA-256 integrity hash
+  createdAt        DateTime    @default(now())
+  findings         Finding[]
 }
 
 model ScanResult {
@@ -125,6 +166,8 @@ model Finding {
   assessment        Assessment?       @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
   assetId           String
   asset             Asset             @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  evidenceId        String?
+  evidence          Evidence?         @relation(fields: [evidenceId], references: [id], onDelete: SetNull)
   title             String
   algorithmOrConfig String
   observedValue     String?           // Actual observed value from scan or evidence

@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/prisma';
@@ -139,7 +140,7 @@ export const executeImport = async (req: Request, res: Response) => {
             : JSON.stringify(item.knownAlgorithms)
           : null;
 
-        await prisma.asset.create({
+        const newAsset = await prisma.asset.create({
           data: {
             name: item.name,
             identifier: item.identifier,
@@ -157,6 +158,44 @@ export const executeImport = async (req: Request, res: Response) => {
             notes: item.notes ? `${item.notes} (Source: ${item.sourceFile})` : `Imported from ${item.sourceFile}`,
           },
         });
+
+        // Create Evidence records for imported algorithms with strict 'imported' provenance
+        if (knownAlgoString) {
+          try {
+            const parsedAlgos = JSON.parse(knownAlgoString);
+            const algoList = Array.isArray(parsedAlgos) ? parsedAlgos : [parsedAlgos];
+            for (const a of algoList) {
+              const algoVal = typeof a === 'string' ? a : a.algorithm || a.name || String(a);
+              const purposeVal = typeof a === 'object' && a.purpose ? a.purpose : 'UNKNOWN';
+              await prisma.evidence.create({
+                data: {
+                  assetId: newAsset.id,
+                  evidenceSource: 'imported',
+                  evidenceType: 'INVENTORY_RECORD',
+                  observedProperty: purposeVal.toLowerCase(),
+                  observedValue: algoVal,
+                  rawPayload: JSON.stringify({ item, algorithm: a }),
+                  hashDigest: crypto.createHash('sha256').update(algoVal).digest('hex'),
+                },
+              });
+            }
+          } catch {
+            const algos = knownAlgoString.split(',').map((s) => s.trim()).filter(Boolean);
+            for (const a of algos) {
+              await prisma.evidence.create({
+                data: {
+                  assetId: newAsset.id,
+                  evidenceSource: 'imported',
+                  evidenceType: 'INVENTORY_RECORD',
+                  observedProperty: 'algorithm',
+                  observedValue: a,
+                  rawPayload: JSON.stringify({ item, algorithm: a }),
+                  hashDigest: crypto.createHash('sha256').update(a).digest('hex'),
+                },
+              });
+            }
+          }
+        }
 
         existingSet.add(cleanId);
         importedCount++;
@@ -187,6 +226,8 @@ export const executeImport = async (req: Request, res: Response) => {
     // Record audit log
     await prisma.auditLog.create({
       data: {
+        userId: (req as any).user?.id || null,
+        institutionId: institution.id,
         action: 'IMPORT_EXECUTED',
         entityType: 'ImportJob',
         entityId: importJob.id,
@@ -197,6 +238,7 @@ export const executeImport = async (req: Request, res: Response) => {
           duplicates: duplicateCount,
           failed: failedCount,
         }),
+        ipAddress: req.ip || req.socket.remoteAddress || null,
       },
     });
 

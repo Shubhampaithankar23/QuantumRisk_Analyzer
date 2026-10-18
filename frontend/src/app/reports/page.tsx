@@ -11,24 +11,28 @@ import {
   RefreshCw,
   Building,
   Calendar,
+  AlertCircle,
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
-import { fetchApi } from '@/lib/api';
+import { fetchApi, API_BASE, getAuthToken } from '@/lib/api';
 
 export default function ReportsPage() {
   const [reportData, setReportData] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchReportSummary = async () => {
     try {
       setLoading(true);
+      setError(null);
       const res = await fetchApi<{ success: boolean; data: any }>('/reports/summary');
       if (res.success) {
         setReportData(res.data);
       }
     } catch (err: any) {
       console.error('Error fetching report summary:', err);
+      setError(err.message || 'Failed to fetch report summary');
     } finally {
       setLoading(false);
     }
@@ -38,16 +42,33 @@ export default function ReportsPage() {
     fetchReportSummary();
   }, []);
 
-  const handleDownloadPdf = () => {
+  const handleDownloadPdf = async () => {
     setDownloading(true);
-    const url = 'http://localhost:4000/api/v1/reports/export/pdf';
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'pq-readiness-assessment-report.pdf';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    setTimeout(() => setDownloading(false), 2000);
+    try {
+      const token = getAuthToken();
+      const url = `${API_BASE}/reports/export/pdf`;
+      const res = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+
+      if (!res.ok) {
+        throw new Error(`Report generation failed with HTTP status ${res.status}`);
+      }
+
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `pq-readiness-assessment-report-${new Date().toISOString().split('T')[0]}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    } catch (err: any) {
+      alert(`PDF Download Error: ${err.message}`);
+    } finally {
+      setDownloading(false);
+    }
   };
 
   const handleDownloadJson = () => {
@@ -56,20 +77,36 @@ export default function ReportsPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'pq-readiness-evidence-export.json';
+    link.download = `pq-readiness-evidence-export-${new Date().toISOString().split('T')[0]}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (
     <div className="min-h-screen bg-slate-50">
       <Header
         title="Assessment Reports"
-        subtitle="Generate and download institutional post-quantum readiness reports."
+        subtitle="Generate and download institutional post-quantum readiness reports from stored database evidence."
       />
 
       <div className="p-6 max-w-4xl mx-auto space-y-6">
+        {error && (
+          <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>{error}</span>
+            </div>
+            <button
+              onClick={fetchReportSummary}
+              className="px-2.5 py-1 font-medium bg-amber-100 hover:bg-amber-200 rounded border border-amber-300 text-amber-900"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         {/* Main PDF Download Card */}
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
@@ -109,22 +146,22 @@ export default function ReportsPage() {
             <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200">
               <span className="text-slate-400 block text-[11px]">Institution</span>
               <strong className="text-slate-900 text-sm block truncate mt-0.5">
-                {reportData?.institution?.name || 'Apex University'}
+                {reportData?.institution?.name || 'Institutional Inventory'}
               </strong>
             </div>
 
             <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200">
               <span className="text-slate-400 block text-[11px]">Systems Evaluated</span>
               <strong className="text-emerald-700 text-sm block mt-0.5">
-                {reportData?.metrics?.assessedAssets} of {reportData?.metrics?.totalAssets} Systems (
-                {reportData?.metrics?.readinessCoveragePct}%)
+                {reportData?.metrics?.assessedAssets ?? 0} of {reportData?.metrics?.totalAssets ?? 0} Systems (
+                {reportData?.metrics?.readinessCoveragePct ?? 0}%)
               </strong>
             </div>
 
             <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200">
               <span className="text-slate-400 block text-[11px]">Evaluation Rules</span>
               <strong className="text-slate-900 font-mono text-sm block mt-0.5">
-                NIST FIPS 203/204/205
+                {reportData?.ruleVersion || 'NIST FIPS 203/204/205'}
               </strong>
             </div>
           </div>
@@ -141,10 +178,18 @@ export default function ReportsPage() {
             </ul>
           </div>
 
+          {/* Scope & Limitations Disclosure */}
+          {reportData?.limitations && (
+            <div className="p-3.5 bg-amber-50 rounded-lg border border-amber-200 text-amber-900 text-xs space-y-1">
+              <span className="font-bold block text-[11px]">Scope & Limitations:</span>
+              <p className="text-[11px] leading-relaxed text-amber-800">{reportData.limitations}</p>
+            </div>
+          )}
+
           <div className="pt-2 flex justify-end">
             <button
               onClick={handleDownloadJson}
-              className="px-3.5 py-1.5 text-xs text-slate-600 hover:text-slate-900 font-medium flex items-center gap-1.5"
+              className="px-3.5 py-1.5 text-xs text-slate-600 hover:text-slate-900 font-medium flex items-center gap-1.5 transition"
             >
               <FileText className="w-3.5 h-3.5 text-slate-400" />
               Export Raw JSON Data
