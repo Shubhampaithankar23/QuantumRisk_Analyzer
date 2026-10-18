@@ -601,7 +601,7 @@ export default function ScanAndImportPage() {
                 <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs space-y-1.5 shadow-sm">
                   <div className="flex items-center gap-2 font-bold text-red-900">
                     <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
-                    <span>Import Preview Error</span>
+                    <span>Import Error</span>
                   </div>
                   <p className="font-mono text-[11px] leading-relaxed break-words bg-white/70 p-2.5 rounded border border-red-100">
                     {importError}
@@ -610,12 +610,22 @@ export default function ScanAndImportPage() {
               )}
 
               {importSummary && (
-                <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs space-y-1">
+                <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs space-y-1.5 shadow-sm">
                   <p className="font-bold text-sm flex items-center gap-1.5">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                     Import Complete!
                   </p>
-                  <p>{importSummary.imported} systems successfully added to your inventory.</p>
+                  <p>{importSummary.imported} systems successfully saved to your inventory.</p>
+                  {importSummary.duplicates > 0 && (
+                    <p className="text-amber-800 font-medium">
+                      &bull; {importSummary.duplicates} duplicate system(s) skipped.
+                    </p>
+                  )}
+                  {importSummary.failed > 0 && (
+                    <p className="text-red-700 font-medium">
+                      &bull; {importSummary.failed} system(s) encountered errors.
+                    </p>
+                  )}
                   <Link
                     href="/assets"
                     className="inline-block mt-2 font-bold text-emerald-900 underline"
@@ -635,17 +645,20 @@ export default function ScanAndImportPage() {
                       Preview: {previewData.validRecords} systems ready to import
                     </h3>
                     <p className="text-xs text-slate-500">
-                      Check the list below. Click "Confirm & Import" to save them.
+                      Check the list below. Click &quot;Confirm &amp; Save&quot; to commit them to the inventory.
                     </p>
                   </div>
 
-                  <button
-                    onClick={handleExecuteImport}
-                    disabled={importing || previewData.validRecords === 0}
-                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-sm disabled:opacity-50 transition"
-                  >
-                    {importing ? 'Saving to Database...' : `Confirm & Save (${previewData.validRecords})`}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleExecuteImport}
+                      disabled={importing || previewData.validRecords === 0}
+                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-sm disabled:opacity-50 transition flex items-center gap-2"
+                    >
+                      {importing && <RefreshCw className="w-3.5 h-3.5 animate-spin text-white" />}
+                      {importing ? 'Saving to Database...' : `Confirm & Save (${previewData.validRecords})`}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="overflow-x-auto max-h-80 border border-slate-200 rounded-lg">

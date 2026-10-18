@@ -230,14 +230,14 @@ export async function fetchApi<T>(endpoint: string, options?: FetchApiOptions): 
         throw lastError;
       }
 
-      const rawMsg = lastError?.message || 'Network connection failed';
+      const rawMsg = lastError?.message || 'Connection failed';
       const isFailedToFetch =
         rawMsg.toLowerCase().includes('failed to fetch') ||
         rawMsg.toLowerCase().includes('network') ||
         rawMsg.toLowerCase().includes('load failed');
 
       const enrichedMsg = isFailedToFetch
-        ? `Network Connection Failure: Unable to reach backend at "${url}". Please ensure the backend server is running and accessible.`
+        ? `Request Failed: Could not connect to backend at "${url}" (${rawMsg}).`
         : rawMsg;
 
       throw new Error(enrichedMsg);
