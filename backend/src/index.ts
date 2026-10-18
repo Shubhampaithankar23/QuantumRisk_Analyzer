@@ -21,11 +21,22 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 import { seedDatabase } from './lib/seed';
 
-const rawCors = process.env.CORS_ORIGIN || 'http://localhost:3000';
+const rawCors = [
+  process.env.CORS_ORIGIN,
+  process.env.FRONTEND_URL,
+  process.env.DEPLOYED_FRONTEND_URL,
+  'http://localhost:3000',
+]
+  .filter(Boolean)
+  .join(',');
 const allowedOrigins = rawCors.split(',').map((o) => o.trim()).filter(Boolean);
 
 // Security Middlewares
-app.use(helmet());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
 app.use(
   cors({
     origin: (origin, callback) => {
@@ -42,14 +53,23 @@ app.use(
         return callback(null, true);
       }
 
-      // Allow explicitly specified origins from env
-      if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+      // Allow explicitly specified origins from env (CORS_ORIGIN, FRONTEND_URL, DEPLOYED_FRONTEND_URL)
+      if (
+        allowedOrigins.some(
+          (allowed) =>
+            allowed === '*' ||
+            allowed === origin ||
+            (allowed.startsWith('http') && origin.startsWith(allowed))
+        )
+      ) {
         return callback(null, true);
       }
 
       // Default allow for seamless cloud deployment
       return callback(null, true);
     },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
     credentials: true,
   })
 );

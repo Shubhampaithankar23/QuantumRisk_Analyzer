@@ -84,96 +84,167 @@ export function logout() {
   document.cookie = 'pq_auth_token=; path=/; max-age=0; SameSite=Lax';
 }
 
-export async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
+export interface FetchApiOptions extends RequestInit {
+  timeoutMs?: number;
+  retries?: number;
+  onStatusChange?: (msg: string) => void;
+  onRetry?: (attempt: number, error: any) => void;
+}
+
+export async function fetchApi<T>(endpoint: string, options?: FetchApiOptions): Promise<T> {
   const url = buildApiUrl(endpoint);
   const token = getAuthToken();
 
+  const maxRetries = options?.retries ?? 1;
+  const timeoutMs = options?.timeoutMs ?? 60000;
+
   const isFormData = typeof FormData !== 'undefined' && options?.body instanceof FormData;
-  const headers: Record<string, string> = {
+  const baseHeaders: Record<string, string> = {
     ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(options?.headers as Record<string, string>),
   };
 
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      ...options,
-      headers,
-      cache: 'no-store',
-    });
-  } catch (networkErr: any) {
-    const rawMsg = networkErr?.message || 'Network connection failed';
-    const isFailedToFetch =
-      rawMsg.toLowerCase().includes('failed to fetch') ||
-      rawMsg.toLowerCase().includes('network') ||
-      rawMsg.toLowerCase().includes('load failed');
+  let lastError: any = null;
 
-    const enrichedMsg = isFailedToFetch
-      ? `Network Connection Failure: Unable to reach backend at "${url}". Please ensure the backend server is running and accessible.`
-      : `Network Error: ${rawMsg} (URL: ${url})`;
-
-    throw new Error(enrichedMsg);
-  }
-
-  let responseBodyText = '';
-  let data: any = {};
-  try {
-    responseBodyText = await response.text();
-    data = JSON.parse(responseBodyText);
-  } catch {
-    data = responseBodyText ? { message: responseBodyText } : {};
-  }
-
-  if (!response.ok) {
-    if (response.status === 401) {
-      logout();
-      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
-        window.location.href = '/login';
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const isRetry = attempt > 0;
+    if (isRetry) {
+      if (options?.onRetry) {
+        options.onRetry(attempt, lastError);
       }
+      if (options?.onStatusChange) {
+        options.onStatusChange('Server is waking up, please wait (cold start may take up to 60s)...');
+      }
+      // Wait before retrying
+      await new Promise((resolve) => setTimeout(resolve, 2500));
     }
 
-    const statusText = response.statusText ? ` ${response.statusText}` : '';
-    const mainMsg =
-      data?.message ||
-      data?.error?.message ||
-      data?.error ||
-      (typeof data === 'string' && data ? data : response.statusText || 'Server Error');
+    const controller = new AbortController();
+    let timeoutTimer: any = null;
+    let wakeUpTimer: any = null;
 
-    const codeTag = data?.code ? ` [${data.code}]` : '';
-
-    let detailsStr = '';
-    if (data?.details) {
-      if (Array.isArray(data.details)) {
-        detailsStr =
-          ' - ' +
-          data.details
-            .map((d: any) =>
-              typeof d === 'object'
-                ? `${d.field ? `${d.field}: ` : ''}${d.message || JSON.stringify(d)}`
-                : String(d)
-            )
-            .join('; ');
-      } else if (typeof data.details === 'object') {
-        detailsStr = ' - ' + JSON.stringify(data.details);
-      } else {
-        detailsStr = ` - ${data.details}`;
-      }
+    if (options?.onStatusChange) {
+      wakeUpTimer = setTimeout(() => {
+        options.onStatusChange?.('Server is waking up, please wait (cold start may take up to 60s)...');
+      }, 3500);
     }
 
-    const fullMessage = `HTTP ${response.status}${statusText}${codeTag}: ${mainMsg}${detailsStr}`;
-    throw new ApiError(
-      response.status,
-      response.statusText,
-      fullMessage,
-      data?.code,
-      data?.details,
-      data,
-      responseBodyText
-    );
+    timeoutTimer = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        headers: baseHeaders,
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+
+      if (wakeUpTimer) clearTimeout(wakeUpTimer);
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+
+      let responseBodyText = '';
+      let data: any = {};
+      try {
+        responseBodyText = await response.text();
+        data = JSON.parse(responseBodyText);
+      } catch {
+        data = responseBodyText ? { message: responseBodyText } : {};
+      }
+
+      // If Render/Cloudflare gateway returns 502/503/504 while waking up, retry once
+      if (!response.ok && [502, 503, 504].includes(response.status) && attempt < maxRetries) {
+        lastError = new Error(`HTTP ${response.status} ${response.statusText}: Gateway waking up`);
+        continue;
+      }
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          logout();
+          if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+            window.location.href = '/login';
+          }
+        }
+
+        const statusText = response.statusText ? ` ${response.statusText}` : '';
+        const mainMsg =
+          data?.message ||
+          data?.error?.message ||
+          data?.error ||
+          (typeof data === 'string' && data ? data : response.statusText || 'Server Error');
+
+        const codeTag = data?.code ? ` [${data.code}]` : '';
+
+        let detailsStr = '';
+        if (data?.details) {
+          if (Array.isArray(data.details)) {
+            detailsStr =
+              ' - ' +
+              data.details
+                .map((d: any) =>
+                  typeof d === 'object'
+                    ? `${d.field ? `${d.field}: ` : ''}${d.message || JSON.stringify(d)}`
+                    : String(d)
+                )
+                .join('; ');
+          } else if (typeof data.details === 'object') {
+            detailsStr = ' - ' + JSON.stringify(data.details);
+          } else {
+            detailsStr = ` - ${data.details}`;
+          }
+        }
+
+        const fullMessage = `HTTP ${response.status}${statusText}${codeTag}: ${mainMsg}${detailsStr}`;
+        throw new ApiError(
+          response.status,
+          response.statusText,
+          fullMessage,
+          data?.code,
+          data?.details,
+          data,
+          responseBodyText
+        );
+      }
+
+      return data;
+    } catch (networkErr: any) {
+      if (wakeUpTimer) clearTimeout(wakeUpTimer);
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+
+      lastError = networkErr;
+
+      if (networkErr.name === 'AbortError' || networkErr.message?.includes('aborted')) {
+        lastError = new Error(
+          `Request timed out after ${timeoutMs / 1000}s waiting for response from "${url}". Server may be waking up or offline.`
+        );
+      }
+
+      // If we got a network error / abort and have retries left, retry once
+      if (attempt < maxRetries && !(networkErr instanceof ApiError)) {
+        continue;
+      }
+
+      if (lastError instanceof ApiError) {
+        throw lastError;
+      }
+
+      const rawMsg = lastError?.message || 'Network connection failed';
+      const isFailedToFetch =
+        rawMsg.toLowerCase().includes('failed to fetch') ||
+        rawMsg.toLowerCase().includes('network') ||
+        rawMsg.toLowerCase().includes('load failed');
+
+      const enrichedMsg = isFailedToFetch
+        ? `Network Connection Failure: Unable to reach backend at "${url}". Please ensure the backend server is running and accessible.`
+        : rawMsg;
+
+      throw new Error(enrichedMsg);
+    }
   }
 
-  return data;
+  throw lastError;
 }
 
 export interface DashboardStats {

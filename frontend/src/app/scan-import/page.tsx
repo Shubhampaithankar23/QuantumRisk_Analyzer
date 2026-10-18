@@ -51,6 +51,7 @@ export default function ScanAndImportPage() {
   const [importing, setImporting] = useState(false);
   const [importSummary, setImportSummary] = useState<any | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [previewStatusMsg, setPreviewStatusMsg] = useState<string | null>(null);
   const [skipDuplicates, setSkipDuplicates] = useState(true);
 
   // Load scan history
@@ -191,6 +192,7 @@ export default function ScanAndImportPage() {
     setPreviewLoading(true);
     setImportError(null);
     setPreviewData(null);
+    setPreviewStatusMsg(null);
 
     try {
       const formData = new FormData();
@@ -201,6 +203,11 @@ export default function ScanAndImportPage() {
       const data = await fetchApi<any>('/imports/preview', {
         method: 'POST',
         body: formData,
+        retries: 1,
+        timeoutMs: 60000,
+        onStatusChange: (statusMsg) => {
+          setPreviewStatusMsg(statusMsg);
+        },
       });
 
       setPreviewData(data.data);
@@ -208,6 +215,7 @@ export default function ScanAndImportPage() {
       setImportError(err.message || 'Failed to parse inventory files');
     } finally {
       setPreviewLoading(false);
+      setPreviewStatusMsg(null);
     }
   };
 
@@ -225,6 +233,8 @@ export default function ScanAndImportPage() {
           items: validItems,
           skipDuplicates,
         }),
+        retries: 1,
+        timeoutMs: 60000,
       });
 
       if (res.success) {
@@ -571,12 +581,19 @@ export default function ScanAndImportPage() {
                     {previewLoading ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" />
-                        Analyzing File...
+                        <span>{previewStatusMsg || 'Analyzing File...'}</span>
                       </>
                     ) : (
                       'Preview Systems'
                     )}
                   </button>
+
+                  {previewLoading && previewStatusMsg && (
+                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-900 text-xs flex items-center gap-2 animate-pulse">
+                      <RefreshCw className="w-4 h-4 animate-spin text-blue-600 flex-shrink-0" />
+                      <span className="font-medium">{previewStatusMsg}</span>
+                    </div>
+                  )}
                 </div>
               )}
 
