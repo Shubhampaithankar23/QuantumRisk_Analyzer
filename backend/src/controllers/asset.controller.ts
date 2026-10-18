@@ -1,18 +1,12 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/prisma';
+import { runAssessmentForAsset } from '../services/assessment.service';
 
 const assetSchema = z.object({
   name: z.string().min(2, 'Asset name is required'),
-  identifier: z.string().min(2, 'Identifier/hostname is required'),
-  assetType: z.enum([
-    'WEBSITE',
-    'SERVER',
-    'APPLICATION',
-    'DATABASE',
-    'DIGITAL_CERTIFICATE',
-    'STORAGE_BACKUP',
-  ]),
+  identifier: z.string().optional(),
+  assetType: z.string().min(2, 'Asset type is required'),
   dataSensitivity: z
     .enum(['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'HIGHLY_SENSITIVE', 'REGULATED'])
     .default('CONFIDENTIAL'),
@@ -22,8 +16,17 @@ const assetSchema = z.object({
     .default('MANUAL'),
   tlsVersion: z.string().optional(),
   port: z.number().int().min(1).max(65535).default(443),
-  environment: z.enum(['PRODUCTION', 'STAGING', 'DEVELOPMENT']).default('PRODUCTION'),
+  environment: z.string().default('PRODUCTION'),
   notes: z.string().optional(),
+  department: z.string().optional(),
+  owner: z.string().optional(),
+  criticality: z.string().optional(),
+  certPubKeyAlgo: z.string().optional(),
+  certKeySize: z.union([z.number(), z.string()]).optional(),
+  certSignatureAlgo: z.string().optional(),
+  cipherSuite: z.string().optional(),
+  keyExchangeGroup: z.string().optional(),
+  cryptoInventory: z.array(z.any()).optional(),
 });
 
 export const getAssets = async (req: Request, res: Response) => {
@@ -196,15 +199,84 @@ export const createAsset = async (req: Request, res: Response) => {
         ? validatedData.informationSource
         : 'MANUAL';
 
+    // Synthesize knownAlgorithms from crypto dropdowns if not directly specified
+    let finalKnownAlgorithms = validatedData.knownAlgorithms;
+    if (!finalKnownAlgorithms) {
+      const items: any[] = [];
+      if (validatedData.certPubKeyAlgo && validatedData.certPubKeyAlgo !== 'Unknown') {
+        const sizeStr =
+          validatedData.certKeySize && validatedData.certKeySize !== 'Unknown'
+            ? `-${validatedData.certKeySize}`
+            : '';
+        items.push({
+          algorithm: `${validatedData.certPubKeyAlgo}${sizeStr}`,
+          purpose: 'DIGITAL_SIGNATURE',
+          source: 'user_reported',
+        });
+      }
+      if (validatedData.keyExchangeGroup && validatedData.keyExchangeGroup !== 'Unknown') {
+        items.push({
+          algorithm: validatedData.keyExchangeGroup,
+          purpose: 'KEY_ESTABLISHMENT',
+          source: 'user_reported',
+        });
+      }
+      if (validatedData.cipherSuite && validatedData.cipherSuite !== 'Unknown') {
+        items.push({
+          algorithm: validatedData.cipherSuite,
+          purpose: 'SYMMETRIC_ENCRYPTION',
+          source: 'user_reported',
+        });
+      }
+      if (Array.isArray(validatedData.cryptoInventory) && validatedData.cryptoInventory.length > 0) {
+        for (const c of validatedData.cryptoInventory) {
+          if (c && c.algorithm && c.algorithm !== 'Unknown') {
+            items.push({
+              algorithm: c.algorithm,
+              keySize: c.keySize !== 'Unknown' ? c.keySize : undefined,
+              purpose: c.purpose !== 'Unknown' ? c.purpose : 'UNKNOWN',
+              source: c.evidenceSource || 'user_reported',
+            });
+          }
+        }
+      }
+      if (items.length > 0) {
+        finalKnownAlgorithms = JSON.stringify(items);
+      }
+    }
+
+    let finalNotes = validatedData.notes || '';
+    const metaParts: string[] = [];
+    if (validatedData.department) metaParts.push(`Department: ${validatedData.department}`);
+    if (validatedData.owner) metaParts.push(`Owner: ${validatedData.owner}`);
+    if (validatedData.criticality) metaParts.push(`Criticality: ${validatedData.criticality}`);
+    if (metaParts.length > 0) {
+      finalNotes = finalNotes ? `${finalNotes} | ${metaParts.join(', ')}` : metaParts.join(', ');
+    }
+
     const newAsset = await prisma.asset.create({
       data: {
-        ...validatedData,
+        name: validatedData.name,
         identifier: finalIdentifier,
+        assetType: validatedData.assetType,
+        dataSensitivity: validatedData.dataSensitivity,
+        knownAlgorithms: finalKnownAlgorithms || null,
         informationSource: infoSource,
         institutionId: institution.id,
+        tlsVersion: validatedData.tlsVersion && validatedData.tlsVersion !== 'Unknown' ? validatedData.tlsVersion : null,
+        port: validatedData.port || 443,
+        environment: validatedData.environment || 'PRODUCTION',
+        notes: finalNotes || null,
         assessmentStatus: 'PENDING',
       },
     });
+
+    // Run assessment engine for this manual asset
+    try {
+      await runAssessmentForAsset(newAsset.id);
+    } catch (assessErr) {
+      console.warn('Initial assessment of manual asset:', assessErr);
+    }
 
     // Record initial AuditLog entry
     await prisma.auditLog.create({
@@ -255,9 +327,29 @@ export const updateAsset = async (req: Request, res: Response) => {
       validatedData.informationSource = asset.informationSource as any;
     }
 
+    // Allowed Prisma Asset fields only
+    const allowedKeys = [
+      'name',
+      'identifier',
+      'assetType',
+      'dataSensitivity',
+      'knownAlgorithms',
+      'informationSource',
+      'tlsVersion',
+      'port',
+      'environment',
+      'notes',
+    ];
+    const updatePayload: Record<string, any> = {};
+    for (const k of allowedKeys) {
+      if ((validatedData as any)[k] !== undefined) {
+        updatePayload[k] = (validatedData as any)[k];
+      }
+    }
+
     // Compute field-by-field diff for edit history audit
     const changedFields: Record<string, { before: any; after: any }> = {};
-    for (const [key, val] of Object.entries(validatedData)) {
+    for (const [key, val] of Object.entries(updatePayload)) {
       if ((asset as any)[key] !== val && val !== undefined) {
         changedFields[key] = { before: (asset as any)[key], after: val };
       }
@@ -265,8 +357,15 @@ export const updateAsset = async (req: Request, res: Response) => {
 
     const updated = await prisma.asset.update({
       where: { id },
-      data: validatedData,
+      data: updatePayload,
     });
+
+    // Re-run assessment after manual update
+    try {
+      await runAssessmentForAsset(updated.id);
+    } catch (assessErr) {
+      console.warn('Re-assessment of updated manual asset:', assessErr);
+    }
 
     // Record audit log with exact delta for change history tracking
     await prisma.auditLog.create({

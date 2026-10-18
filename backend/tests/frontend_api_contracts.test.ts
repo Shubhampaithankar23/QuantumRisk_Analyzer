@@ -4,6 +4,7 @@ import prisma from '../src/lib/prisma';
 import { generateToken } from '../src/middleware/auth';
 
 describe('Phase 5: Frontend API Integration & Data Contracts', () => {
+  let adminUserId: string;
   let adminToken: string;
   let testAssetLive: any;
   let testAssetManual: any;
@@ -12,13 +13,33 @@ describe('Phase 5: Frontend API Integration & Data Contracts', () => {
   let testFinding: any;
 
   beforeAll(async () => {
-    const institution = await prisma.institution.findFirst();
-    const instId = institution?.id || 'inst-default';
+    let institution = await prisma.institution.findFirst();
+    if (!institution) {
+      institution = await prisma.institution.create({
+        data: {
+          name: 'Phase 5 Test Institution',
+          domain: 'p5-test.edu',
+        },
+      });
+    }
+    const instId = institution.id;
+
+    // Create DB user for foreign key integrity
+    const adminUser = await prisma.user.create({
+      data: {
+        email: `admin-p5-${Date.now()}@apex.edu`,
+        name: 'Phase 5 Admin',
+        passwordHash: 'dummy-hash-p5',
+        role: 'ADMIN',
+        institutionId: instId,
+      },
+    });
+    adminUserId = adminUser.id;
 
     adminToken = generateToken({
-      id: 'test-admin-p5',
-      name: 'Admin P5',
-      email: 'admin-p5@apex.edu',
+      id: adminUser.id,
+      name: adminUser.name,
+      email: adminUser.email,
       role: 'ADMIN',
       institutionId: instId,
     });
@@ -59,7 +80,7 @@ describe('Phase 5: Frontend API Integration & Data Contracts', () => {
         port: 443,
         status: 'COMPLETED',
         authorizationConfirmed: true,
-        authorizedBy: 'test-admin-p5',
+        authorizedBy: adminUser.id,
       },
     });
 
@@ -105,6 +126,7 @@ describe('Phase 5: Frontend API Integration & Data Contracts', () => {
     if (testScan) await prisma.scanJob.deleteMany({ where: { id: testScan.id } });
     if (testAssetLive) await prisma.asset.deleteMany({ where: { id: testAssetLive.id } });
     if (testAssetManual) await prisma.asset.deleteMany({ where: { id: testAssetManual.id } });
+    if (adminUserId) await prisma.user.delete({ where: { id: adminUserId } }).catch(() => {});
   });
 
   describe('1. GET /api/v1/dashboard/stats', () => {
@@ -205,8 +227,87 @@ describe('Phase 5: Frontend API Integration & Data Contracts', () => {
     });
   });
 
-  describe('3. GET /api/v1/reports/summary', () => {
-    it('returns report summary with institutional metrics and limitations disclosure', async () => {
+  describe('3. Remediation Tracking & Status Transition (PATCH /findings/:id)', () => {
+    it('updates finding status and updates remediation metrics in dashboard stats', async () => {
+      const patchRes = await request(app)
+        .patch(`/api/v1/findings/${testFinding.id}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          status: 'RESOLVED',
+          owner: 'Post-Quantum Taskforce Lead',
+          priority: 'CRITICAL',
+        });
+
+      expect(patchRes.status).toBe(200);
+      expect(patchRes.body.success).toBe(true);
+      expect(patchRes.body.data.status).toBe('RESOLVED');
+      expect(patchRes.body.data.owner).toBe('Post-Quantum Taskforce Lead');
+
+      // Verify dashboard reflects the updated resolution count
+      const dashRes = await request(app)
+        .get('/api/v1/dashboard/stats')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(dashRes.status).toBe(200);
+      expect(dashRes.body.data.remediationStats.resolved).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('4. Missing Telemetry, Inconclusive & Partial Assessment Handling', () => {
+    it('flags assets without cryptographic evidence in missingInfo without assigning fake scores', async () => {
+      const res = await request(app)
+        .get('/api/v1/dashboard/stats')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(200);
+      const data = res.body.data;
+
+      // testAssetManual has no evidence recorded yet, must be accounted for in missingInfo
+      expect(data.missingInfo.count).toBeGreaterThanOrEqual(1);
+      const foundInMissing = data.missingInfo.assets.some(
+        (a: any) => a.id === testAssetManual.id
+      );
+      expect(foundInMissing).toBe(true);
+    });
+
+    it('evaluates asset without evidence honestly as NOT_ASSESSED with score 0 (inconclusive state)', async () => {
+      const assessRes = await request(app)
+        .post(`/api/v1/assessments/run/${testAssetManual.id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(assessRes.status).toBe(200);
+      expect(assessRes.body.data.quantumRiskScore).toBe(0);
+      expect(assessRes.body.data.overallReadinessStatus).toBe('NOT_ASSESSED');
+    });
+  });
+
+  describe('5. Empty States & Query Filtering Resilience', () => {
+    it('returns empty array when search query matches no assets (graceful empty state)', async () => {
+      const res = await request(app)
+        .get('/api/v1/assets?search=nonexistent_system_identifier_xyz_999')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(Array.isArray(res.body.data)).toBe(true);
+      expect(res.body.data.length).toBe(0);
+      expect(res.body.pagination.total).toBe(0);
+    });
+
+    it('returns empty array when findings filter matches no results (graceful empty state)', async () => {
+      const res = await request(app)
+        .get('/api/v1/findings?search=nonexistent_finding_token_999999')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(Array.isArray(res.body.data)).toBe(true);
+      expect(res.body.data.length).toBe(0);
+    });
+  });
+
+  describe('6. Reports from Stored Database Data (PDF & JSON)', () => {
+    it('GET /api/v1/reports/summary returns report summary with metrics and limitations disclosure', async () => {
       const res = await request(app)
         .get('/api/v1/reports/summary')
         .set('Authorization', `Bearer ${adminToken}`);
@@ -223,23 +324,15 @@ describe('Phase 5: Frontend API Integration & Data Contracts', () => {
       expect(rep).toHaveProperty('limitations');
       expect(rep.limitations).toContain('observable protocol handshakes');
     });
-  });
 
-  describe('4. Missing Telemetry & Honest Unknown Handling', () => {
-    it('flags assets without cryptographic evidence in missingInfo without assigning fake scores', async () => {
+    it('GET /api/v1/reports/export/pdf generates a multi-page PDF report from stored database data', async () => {
       const res = await request(app)
-        .get('/api/v1/dashboard/stats')
+        .get('/api/v1/reports/export/pdf')
         .set('Authorization', `Bearer ${adminToken}`);
 
       expect(res.status).toBe(200);
-      const data = res.body.data;
-
-      // testAssetManual has no evidence recorded yet, must be accounted for in missingInfo
-      expect(data.missingInfo.count).toBeGreaterThanOrEqual(1);
-      const foundInMissing = data.missingInfo.assets.some(
-        (a: any) => a.id === testAssetManual.id
-      );
-      expect(foundInMissing).toBe(true);
+      expect(res.header['content-type']).toBe('application/pdf');
+      expect(res.body.length).toBeGreaterThan(1000); // Verifies valid non-empty PDF binary stream
     });
   });
 });

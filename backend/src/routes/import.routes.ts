@@ -5,6 +5,7 @@ import {
   executeImport,
   getImportHistory,
 } from '../controllers/import.controller';
+import { authenticateToken, requireRole } from '../middleware/auth';
 
 const router = Router();
 const upload = multer({
@@ -15,12 +16,12 @@ const upload = multer({
   },
 });
 
-router.post('/imports/preview', upload.array('files', 10), previewFiles);
-router.post('/import/preview', upload.array('files', 10), previewFiles);
-router.post('/imports/execute', executeImport);
-router.post('/import/commit', executeImport);
-router.post('/imports/commit', executeImport);
-router.get('/imports/history', getImportHistory);
-router.get('/import/history', getImportHistory);
+router.post('/imports/preview', authenticateToken, requireRole(['ADMIN']), upload.array('files', 10), previewFiles);
+router.post('/import/preview', authenticateToken, requireRole(['ADMIN']), upload.array('files', 10), previewFiles);
+router.post('/imports/execute', authenticateToken, requireRole(['ADMIN']), executeImport);
+router.post('/import/commit', authenticateToken, requireRole(['ADMIN']), executeImport);
+router.post('/imports/commit', authenticateToken, requireRole(['ADMIN']), executeImport);
+router.get('/imports/history', authenticateToken, requireRole(['ADMIN', 'ANALYST', 'VIEWER']), getImportHistory);
+router.get('/import/history', authenticateToken, requireRole(['ADMIN', 'ANALYST', 'VIEWER']), getImportHistory);
 
 export default router;

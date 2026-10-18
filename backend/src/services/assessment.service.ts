@@ -67,7 +67,7 @@ function normalizeAlgorithmForDeduplication(rawAlgorithm: string, purpose?: stri
   return algorithm;
 }
 
-export function evaluateAlgorithm(
+function evaluateInternal(
   rawAlgo: string,
   declaredPurpose?: string,
   evidenceSourceInput: string = 'inferred'
@@ -553,6 +553,21 @@ export function evaluateAlgorithm(
       urgency: 'LOW',
     },
   };
+}
+
+export function evaluateAlgorithm(
+  rawAlgo: string,
+  declaredPurpose?: string,
+  evidenceSourceInput: string = 'inferred'
+): FindingEvaluation {
+  const finding = evaluateInternal(rawAlgo, declaredPurpose, evidenceSourceInput);
+  if (finding.evidenceSource === 'user_reported') {
+    finding.confidence = finding.confidence === 'NEEDS_VERIFICATION' ? 'NEEDS_VERIFICATION' : 'MEDIUM';
+    if (!finding.limitations.includes('User-reported (unverified)')) {
+      finding.limitations = `${finding.limitations} [User-reported (unverified): Reported manually without independent network cryptographic verification.]`;
+    }
+  }
+  return finding;
 }
 
 function inferPurpose(

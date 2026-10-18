@@ -145,7 +145,7 @@ export async function processFileForPreview(
       return undefined;
     };
 
-    const name = getVal('name', 'assetname', 'systemname', 'title') || `Imported Asset ${rowNum}`;
+    const name = getVal('name', 'assetname', 'systemname', 'title');
     const identifier = getVal('identifier', 'hostname', 'host', 'url', 'domain', 'ip', 'address');
     const rawType = getVal('assettype', 'type', 'category');
     const rawSensitivity = getVal('datasensitivity', 'sensitivity', 'classification');
@@ -155,7 +155,11 @@ export async function processFileForPreview(
     const rawEnv = getVal('environment', 'env');
     const notes = getVal('notes', 'description', 'comments');
 
-    if (!identifier) {
+    if (!name || name.trim() === '') {
+      errors.push('Missing required asset name');
+    }
+
+    if (!identifier || identifier.trim() === '') {
       errors.push('Missing required hostname or identifier');
     }
 
@@ -169,9 +173,11 @@ export async function processFileForPreview(
     }
 
     let port = 443;
-    if (rawPort) {
-      const parsedPort = parseInt(rawPort, 10);
-      if (!isNaN(parsedPort) && parsedPort >= 1 && parsedPort <= 65535) {
+    if (rawPort !== undefined && rawPort !== null && String(rawPort).trim() !== '') {
+      const parsedPort = parseInt(String(rawPort).trim(), 10);
+      if (isNaN(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
+        errors.push(`Invalid port number "${rawPort}" (must be an integer between 1 and 65535)`);
+      } else {
         port = parsedPort;
       }
     }
@@ -180,7 +186,7 @@ export async function processFileForPreview(
     const dataSensitivity = normalizeSensitivity(rawSensitivity);
 
     items.push({
-      name,
+      name: name || `(Unspecified Row ${rowNum})`,
       identifier: identifier || `unknown-host-${rowNum}`,
       assetType,
       dataSensitivity,
