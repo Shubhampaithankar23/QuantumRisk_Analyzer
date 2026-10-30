@@ -29,6 +29,83 @@ const assetSchema = z.object({
   cryptoInventory: z.array(z.any()).optional(),
 });
 
+const emptyStringToNull = (val: unknown) => {
+  if (typeof val === 'string' && val.trim() === '') return null;
+  return val;
+};
+
+const emptyStringToUndefined = (val: unknown) => {
+  if (typeof val === 'string' && val.trim() === '') return undefined;
+  if (val === null) return undefined;
+  return val;
+};
+
+export const updateAssetSchema = z.object({
+  name: z.preprocess(
+    emptyStringToUndefined,
+    z.string().trim().min(2, 'Asset name must be at least 2 characters').optional()
+  ),
+  identifier: z.preprocess(
+    emptyStringToUndefined,
+    z.string().trim().min(1, 'System identifier cannot be empty').optional()
+  ),
+  assetType: z.preprocess(
+    emptyStringToUndefined,
+    z.string().trim().min(2, 'Asset type is required').optional()
+  ),
+  dataSensitivity: z.preprocess(
+    emptyStringToUndefined,
+    z
+      .enum(['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'HIGHLY_SENSITIVE', 'REGULATED'], {
+        errorMap: () => ({ message: 'Invalid data sensitivity tier' }),
+      })
+      .optional()
+  ),
+  knownAlgorithms: z.preprocess(
+    (val) => (val === '' || val === 'Unknown' || val === null ? null : typeof val === 'string' ? val.trim() : val),
+    z.string().nullable().optional()
+  ),
+  informationSource: z.preprocess(
+    emptyStringToUndefined,
+    z
+      .enum(['TLS_SCAN', 'IMPORT_CSV', 'IMPORT_XLSX', 'IMPORT_JSON', 'MANUAL'], {
+        errorMap: () => ({ message: 'Invalid information source' }),
+      })
+      .optional()
+  ),
+  tlsVersion: z.preprocess(
+    (val) => (val === '' || val === 'Unknown' || val === null ? null : typeof val === 'string' ? val.trim() : val),
+    z.string().nullable().optional()
+  ),
+  port: z.preprocess(
+    (val) => {
+      if (val === '' || val === null || val === undefined) return undefined;
+      const num = Number(val);
+      return isNaN(num) ? val : num;
+    },
+    z
+      .number({ invalid_type_error: 'Port must be a valid integer' })
+      .int('Port must be a valid integer')
+      .min(1, 'Port must be between 1 and 65535')
+      .max(65535, 'Port must be between 1 and 65535')
+      .optional()
+  ),
+  environment: z.preprocess(emptyStringToUndefined, z.string().trim().optional()),
+  notes: z.preprocess(
+    (val) => (val === '' || val === null ? null : typeof val === 'string' ? val.trim() : val),
+    z.string().nullable().optional()
+  ),
+  department: z.preprocess(emptyStringToNull, z.string().nullable().optional()),
+  owner: z.preprocess(emptyStringToNull, z.string().nullable().optional()),
+  criticality: z.preprocess(emptyStringToNull, z.union([z.number(), z.string()]).nullable().optional()),
+  certPubKeyAlgo: z.preprocess(emptyStringToNull, z.string().nullable().optional()),
+  certKeySize: z.preprocess(emptyStringToNull, z.union([z.number(), z.string()]).nullable().optional()),
+  certSignatureAlgo: z.preprocess(emptyStringToNull, z.string().nullable().optional()),
+  cipherSuite: z.preprocess(emptyStringToNull, z.string().nullable().optional()),
+  keyExchangeGroup: z.preprocess(emptyStringToNull, z.string().nullable().optional()),
+  cryptoInventory: z.array(z.any()).optional(),
+});
+
 export const getAssets = async (req: Request, res: Response) => {
   try {
     const {
@@ -315,37 +392,69 @@ export const createAsset = async (req: Request, res: Response) => {
 export const updateAsset = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const validatedData = assetSchema.partial().parse(req.body);
+
+    // Validate and whitelist input data, coercing types and converting empty strings/nulls
+    const validatedData = updateAssetSchema.parse(req.body);
 
     const asset = await prisma.asset.findUnique({ where: { id } });
     if (!asset) {
       return res.status(404).json({ success: false, message: 'Asset not found' });
     }
 
-    // Prevent changing source to TLS_SCAN manually
-    if (validatedData.informationSource === 'TLS_SCAN' && asset.informationSource !== 'TLS_SCAN') {
-      validatedData.informationSource = asset.informationSource as any;
-    }
-
-    // Allowed Prisma Asset fields only
-    const allowedKeys = [
-      'name',
-      'identifier',
-      'assetType',
-      'dataSensitivity',
-      'knownAlgorithms',
-      'informationSource',
-      'tlsVersion',
-      'port',
-      'environment',
-      'notes',
-    ];
-    const updatePayload: Record<string, any> = {};
-    for (const k of allowedKeys) {
-      if ((validatedData as any)[k] !== undefined) {
-        updatePayload[k] = (validatedData as any)[k];
+    // Never allow manual update to forge TLS_SCAN provenance
+    let finalInfoSource = asset.informationSource;
+    if (validatedData.informationSource && validatedData.informationSource !== 'TLS_SCAN') {
+      if (asset.informationSource === 'MANUAL' || validatedData.informationSource === asset.informationSource) {
+        finalInfoSource = validatedData.informationSource;
       }
     }
+
+    // Synthesize knownAlgorithms from crypto dropdowns if not directly specified but dropdowns are passed
+    let finalKnownAlgorithms = validatedData.knownAlgorithms;
+    if (finalKnownAlgorithms === undefined) {
+      const items: any[] = [];
+      if (validatedData.certPubKeyAlgo && validatedData.certPubKeyAlgo !== 'Unknown') {
+        const sizeStr =
+          validatedData.certKeySize && validatedData.certKeySize !== 'Unknown'
+            ? `-${validatedData.certKeySize}`
+            : '';
+        items.push({
+          algorithm: `${validatedData.certPubKeyAlgo}${sizeStr}`,
+          purpose: 'DIGITAL_SIGNATURE',
+          source: 'user_reported',
+        });
+      }
+      if (validatedData.keyExchangeGroup && validatedData.keyExchangeGroup !== 'Unknown') {
+        items.push({
+          algorithm: validatedData.keyExchangeGroup,
+          purpose: 'KEY_ESTABLISHMENT',
+          source: 'user_reported',
+        });
+      }
+      if (validatedData.cipherSuite && validatedData.cipherSuite !== 'Unknown') {
+        items.push({
+          algorithm: validatedData.cipherSuite,
+          purpose: 'SYMMETRIC_ENCRYPTION',
+          source: 'user_reported',
+        });
+      }
+      if (items.length > 0) {
+        finalKnownAlgorithms = JSON.stringify(items);
+      }
+    }
+
+    // Whitelist and map only supported Prisma Asset model fields
+    const updatePayload: Record<string, any> = {};
+    if (validatedData.name !== undefined) updatePayload.name = validatedData.name;
+    if (validatedData.identifier !== undefined) updatePayload.identifier = validatedData.identifier;
+    if (validatedData.assetType !== undefined) updatePayload.assetType = validatedData.assetType;
+    if (validatedData.dataSensitivity !== undefined) updatePayload.dataSensitivity = validatedData.dataSensitivity;
+    if (finalKnownAlgorithms !== undefined) updatePayload.knownAlgorithms = finalKnownAlgorithms;
+    updatePayload.informationSource = finalInfoSource;
+    if (validatedData.tlsVersion !== undefined) updatePayload.tlsVersion = validatedData.tlsVersion;
+    if (validatedData.port !== undefined) updatePayload.port = validatedData.port;
+    if (validatedData.environment !== undefined) updatePayload.environment = validatedData.environment;
+    if (validatedData.notes !== undefined) updatePayload.notes = validatedData.notes;
 
     // Compute field-by-field diff for edit history audit
     const changedFields: Record<string, { before: any; after: any }> = {};
@@ -367,33 +476,90 @@ export const updateAsset = async (req: Request, res: Response) => {
       console.warn('Re-assessment of updated manual asset:', assessErr);
     }
 
-    // Record audit log with exact delta for change history tracking
-    await prisma.auditLog.create({
-      data: {
-        userId: (req as any).user?.id || null,
-        institutionId: asset.institutionId,
-        action: 'ASSET_UPDATED',
-        entityType: 'Asset',
-        entityId: updated.id,
-        details: JSON.stringify({
-          changedFields,
-          updatedKeys: Object.keys(changedFields),
-        }),
-        ipAddress: req.ip || req.socket.remoteAddress || null,
-      },
-    });
+    // Safely record audit log with exact delta for change history tracking
+    try {
+      let validUserId: string | null = null;
+      const reqUserId = (req as any).user?.id;
+      if (reqUserId) {
+        const userExists = await prisma.user.findUnique({
+          where: { id: reqUserId },
+          select: { id: true },
+        });
+        if (userExists) {
+          validUserId = userExists.id;
+        }
+      }
 
-    res.status(200).json({
+      await prisma.auditLog.create({
+        data: {
+          userId: validUserId,
+          institutionId: asset.institutionId,
+          action: 'ASSET_UPDATED',
+          entityType: 'Asset',
+          entityId: updated.id,
+          details: JSON.stringify({
+            changedFields,
+            updatedKeys: Object.keys(changedFields),
+          }),
+          ipAddress: req.ip || req.socket.remoteAddress || null,
+        },
+      });
+    } catch (auditErr: any) {
+      console.warn('[updateAsset] Failed to write audit log:', auditErr?.message);
+    }
+
+    return res.status(200).json({
       success: true,
       message: 'Asset updated successfully',
       data: updated,
     });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ success: false, message: 'Validation failed', errors: error.errors });
+      const details = error.errors.map((e) => ({
+        field: e.path.join('.'),
+        message: e.message,
+      }));
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed: ' + error.errors.map((e) => e.message).join('; '),
+        errors: error.errors,
+        details,
+      });
     }
-    console.error('Failed to update asset:', error);
-    res.status(500).json({ success: false, message: 'Failed to update asset', error: error.message });
+
+    if (error?.code === 'P2025') {
+      return res.status(404).json({
+        success: false,
+        message: 'Asset not found',
+      });
+    }
+
+    if (error?.name === 'PrismaClientValidationError') {
+      console.error('[updateAsset] PrismaClientValidationError:', {
+        name: error.name,
+        message: error.message,
+        assetId: req.params?.id,
+        body: req.body,
+      });
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid asset data provided for update',
+      });
+    }
+
+    console.error('[updateAsset] Error updating asset:', {
+      name: error?.name,
+      code: error?.code,
+      message: error?.message,
+      assetId: req.params?.id,
+      body: req.body,
+      stack: error?.stack,
+    });
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update asset',
+    });
   }
 };
 

@@ -128,13 +128,26 @@ export default function AssetsPage() {
 
   const handleOpenEdit = (asset: AssetRecord) => {
     setEditingAsset(asset);
+    let readableAlgos = asset.knownAlgorithms || '';
+    if (readableAlgos.startsWith('[') && readableAlgos.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(readableAlgos);
+        if (Array.isArray(parsed)) {
+          readableAlgos = parsed
+            .map((item: any) => item.algorithm || item)
+            .filter(Boolean)
+            .join(', ');
+        }
+      } catch {}
+    }
+
     setFormData({
       name: asset.name,
       identifier: asset.identifier,
       assetType: asset.assetType,
       dataSensitivity: asset.dataSensitivity,
-      knownAlgorithms: asset.knownAlgorithms || '',
-      tlsVersion: asset.tlsVersion || 'TLSv1.3',
+      knownAlgorithms: readableAlgos,
+      tlsVersion: asset.tlsVersion || 'Unknown',
       port: asset.port,
       environment: asset.environment,
       certPubKeyAlgo: 'Unknown',
@@ -225,7 +238,23 @@ export default function AssetsPage() {
       setEditingAsset(null);
       fetchAssets();
     } catch (err: any) {
-      setFormError(err.message || 'Failed to save asset record');
+      let serverMsg = err?.data?.message || err?.data?.error || err?.message || 'Failed to save asset record';
+      if (err?.data?.details) {
+        const detailsStr = Array.isArray(err.data.details)
+          ? err.data.details
+              .map((d: any) =>
+                typeof d === 'object' ? `${d.field ? `${d.field}: ` : ''}${d.message || JSON.stringify(d)}` : String(d)
+              )
+              .join('; ')
+          : typeof err.data.details === 'object'
+          ? JSON.stringify(err.data.details)
+          : String(err.data.details);
+        serverMsg = `${serverMsg} (${detailsStr})`;
+      } else if (err?.data?.errors && Array.isArray(err.data.errors)) {
+        const errorStr = err.data.errors.map((e: any) => e.message || JSON.stringify(e)).join('; ');
+        serverMsg = `${serverMsg} (${errorStr})`;
+      }
+      setFormError(serverMsg);
     } finally {
       setSubmitting(false);
     }
