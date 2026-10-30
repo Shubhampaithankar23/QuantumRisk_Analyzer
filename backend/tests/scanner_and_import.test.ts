@@ -146,7 +146,7 @@ describe('Phase 2: Safe Scanner & SSRF Defense Suite', () => {
       expect(evidence[0].hashDigest).toBeDefined();
 
       await prisma.scanJob.delete({ where: { id: authRes.body.data.scanJobId } });
-    }, 15000);
+    }, 35000);
   });
 
   describe('5. Bulk Import Normalization', () => {

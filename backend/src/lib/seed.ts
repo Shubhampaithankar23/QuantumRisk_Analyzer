@@ -57,6 +57,42 @@ export async function seedDatabase() {
     console.log(`[Seed] Created internal administrator: ${internalAdmin.email}`);
   }
 
+  let analystUser = await prisma.user.findUnique({
+    where: { email: 'analyst@quantumrisk.internal' },
+  });
+
+  if (!analystUser) {
+    const analystHash = await bcrypt.hash('Analyst@PQ2026!', 10);
+    analystUser = await prisma.user.create({
+      data: {
+        email: 'analyst@quantumrisk.internal',
+        name: 'Quantum Risk Analyst',
+        passwordHash: analystHash,
+        role: 'ANALYST',
+        institutionId: institution.id,
+      },
+    });
+    console.log(`[Seed] Created analyst user: ${analystUser.email}`);
+  }
+
+  let viewerUser = await prisma.user.findUnique({
+    where: { email: 'viewer@quantumrisk.internal' },
+  });
+
+  if (!viewerUser) {
+    const viewerHash = await bcrypt.hash('Viewer@PQ2026!', 10);
+    viewerUser = await prisma.user.create({
+      data: {
+        email: 'viewer@quantumrisk.internal',
+        name: 'Compliance Auditor',
+        passwordHash: viewerHash,
+        role: 'VIEWER',
+        institutionId: institution.id,
+      },
+    });
+    console.log(`[Seed] Created viewer user: ${viewerUser.email}`);
+  }
+
   // Check baseline assets
   const existingAssetsCount = await prisma.asset.count({
     where: { institutionId: institution.id },
