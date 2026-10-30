@@ -14,12 +14,16 @@ frontend/out/
 backend/dist/
 
 # SQLite Database
+*.db
+*.db-journal
+*.sqlite
+*.sqlite-journal
+dev.db
+backend/dev.db
 backend/prisma/*.db
 backend/prisma/*.db-journal
 backend/prisma/dev.db
 backend/prisma/dev.db-journal
-*.sqlite
-*.sqlite-journal
 
 # Environment variables
 .env

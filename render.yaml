@@ -4,8 +4,8 @@ services:
     runtime: node
     plan: free
     rootDir: backend
-    buildCommand: npm ci --include=dev && npm run build && npx prisma db push
-    startCommand: npx prisma migrate deploy && npm start
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: prisma migrate deploy && node dist/index.js
     healthCheckPath: /api/v1/health
     envVars:
       - key: NODE_ENV
